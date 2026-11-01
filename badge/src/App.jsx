@@ -293,7 +293,20 @@ function RecordPage({ onError, onSaved }) {
       if (sessionError) throw sessionError;
       if (!session) throw new Error("Sign in again to transcribe audio.");
 
-      const extension = mimeType.includes("mp4") ? "mp4" : "webm";
+      const mediaType = mimeType.split(";")[0].trim().toLowerCase();
+      const extensions = {
+        "audio/aac": "aac",
+        "audio/mp4": "mp4",
+        "audio/mpeg": "mp3",
+        "audio/ogg": "ogg",
+        "audio/wav": "wav",
+        "audio/webm": "webm",
+        "audio/x-wav": "wav",
+      };
+      const extension = extensions[mediaType];
+      if (!extension) {
+        throw new Error(`This browser recorded an unsupported audio format: ${mediaType || "unknown"}.`);
+      }
       const formData = new FormData();
       formData.append("audio", blob, `recording.${extension}`);
       formData.append("durationSeconds", String(durationSeconds));
@@ -303,7 +316,22 @@ function RecordPage({ onError, onSaved }) {
         body: formData,
         signal: controller.signal,
       });
-      const result = await response.json();
+      const responseText = await response.text();
+      let result;
+      try {
+        result = JSON.parse(responseText);
+      } catch {
+        if (response.status === 404 && !responseText.trim()) {
+          throw new Error(
+            "This browser tab is connected to an app server without the transcription API. Open the exact Vite URL printed by npm run dev from the badge folder (currently http://localhost:5173).",
+          );
+        }
+        throw new Error(
+          responseText.trim()
+            ? `The transcription server returned an invalid response (HTTP ${response.status}).`
+            : `The transcription server returned an empty response (HTTP ${response.status}). Check the terminal running npm run dev.`,
+        );
+      }
       if (!response.ok) {
         throw new Error(result.error || "Transcription failed.");
       }
@@ -344,27 +372,62 @@ function RecordPage({ onError, onSaved }) {
       return;
     }
 
+    let stream;
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       if (!mounted.current) {
         stream.getTracks().forEach((track) => track.stop());
         return;
       }
-      const mimeType = ["audio/webm;codecs=opus", "audio/webm", "audio/mp4"].find(
-        (type) => MediaRecorder.isTypeSupported(type),
-      );
-      const activeRecorder = new MediaRecorder(
-        stream,
-        mimeType ? { mimeType } : undefined,
-      );
+      const supportedTypes = [
+        "audio/webm;codecs=opus",
+        "audio/mp4",
+        "audio/webm",
+      ];
+      let activeRecorder;
+      let requestedMimeType = "";
+      for (const type of supportedTypes) {
+        try {
+          if (!MediaRecorder.isTypeSupported(type)) continue;
+          activeRecorder = new MediaRecorder(stream, { mimeType: type });
+          requestedMimeType = type;
+          break;
+        } catch {
+          // A browser may report a format as supported but reject its exact codec string.
+        }
+      }
+      if (!activeRecorder) activeRecorder = new MediaRecorder(stream);
       chunks.current = [];
       activeRecorder.ondataavailable = (event) => {
         if (event.data.size) chunks.current.push(event.data);
+      };
+      activeRecorder.onerror = (event) => {
+        window.clearTimeout(autoStopTimer.current);
+        stream.getTracks().forEach((track) => track.stop());
+        if (mounted.current) {
+          setRecording(false);
+          onError(
+            event.error?.message ||
+              "The browser could not record audio. Check microphone permissions and try again.",
+          );
+        }
       };
       activeRecorder.onstop = () => {
         stream.getTracks().forEach((track) => track.stop());
         window.clearTimeout(autoStopTimer.current);
         if (!mounted.current) return;
+        const recordedMimeType =
+          activeRecorder.mimeType ||
+          chunks.current.find((chunk) => chunk.type)?.type ||
+          requestedMimeType ||
+          (/\bSafari\//.test(navigator.userAgent) &&
+          !/\bChrome\//.test(navigator.userAgent)
+            ? "audio/mp4"
+            : "audio/webm");
+        if (!recordedMimeType) {
+          onError("The browser did not provide a recording audio format.");
+          return;
+        }
         const durationSeconds = Math.max(
           1,
           Math.min(
@@ -374,9 +437,9 @@ function RecordPage({ onError, onSaved }) {
         );
         void transcribe(
           new Blob(chunks.current, {
-            type: activeRecorder.mimeType || "audio/webm",
+            type: recordedMimeType,
           }),
-          activeRecorder.mimeType || "audio/webm",
+          recordedMimeType,
           durationSeconds,
         );
       };
@@ -391,6 +454,7 @@ function RecordPage({ onError, onSaved }) {
         }
       }, MAX_RECORDING_MS);
     } catch (error) {
+      stream?.getTracks().forEach((track) => track.stop());
       if (mounted.current) {
         onError(error.message || "Could not access the microphone.");
       }
