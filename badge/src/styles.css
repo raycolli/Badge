@@ -1,6 +1,6 @@
 :root {
   font-family: Arial, sans-serif;
-  color: #202124;
+  color: #111;
   background: #fff;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
@@ -19,9 +19,14 @@ body {
   background: #fff;
 }
 
-button {
+button,
+input {
   font: inherit;
   -webkit-tap-highlight-color: transparent;
+}
+
+button {
+  color: inherit;
 }
 
 .page-shell {
@@ -74,13 +79,18 @@ h1 {
 }
 
 .google-button:focus-visible,
-.text-button:focus-visible {
-  outline: 2px solid #4285f4;
-  outline-offset: 2px;
+.plain-button:focus-visible,
+.record-button:focus-visible,
+.nav-tab:focus-visible,
+.badge-photo:focus-visible {
+  outline: 2px solid #111;
+  outline-offset: 3px;
 }
 
 .google-button:disabled,
-.text-button:disabled {
+.plain-button:disabled,
+.record-button:disabled,
+.badge-photo:disabled {
   cursor: wait;
   opacity: 0.65;
 }
@@ -91,30 +101,6 @@ h1 {
   flex: 0 0 auto;
 }
 
-.signed-in-panel {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-}
-
-.account-email {
-  overflow: hidden;
-  color: #5f6368;
-  font-size: 14px;
-  text-overflow: ellipsis;
-}
-
-.text-button {
-  padding: 8px 0 8px 8px;
-  border: 0;
-  background: transparent;
-  color: #1a73e8;
-  cursor: pointer;
-  font-size: 14px;
-  white-space: nowrap;
-}
-
 .error-message {
   margin: 18px 0 0;
   color: #b3261e;
@@ -122,8 +108,283 @@ h1 {
   line-height: 1.5;
 }
 
-@media (max-width: 420px) {
-  .login-card {
-    padding: 24px;
+.app-shell {
+  min-height: 100vh;
+  padding-bottom: calc(74px + env(safe-area-inset-bottom));
+  background: #fff;
+}
+
+.app-header {
+  display: flex;
+  width: min(100%, 680px);
+  height: 56px;
+  align-items: center;
+  justify-content: flex-end;
+  margin: 0 auto;
+  padding: 0 24px;
+}
+
+.plain-button {
+  padding: 8px 0;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  font-size: 14px;
+}
+
+.profile-page {
+  display: flex;
+  width: min(100%, 520px);
+  min-height: calc(100dvh - 130px);
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  margin: 0 auto;
+  padding: 8px 24px 28px;
+}
+
+.badge-card {
+  width: min(100%, 370px);
+  overflow: hidden;
+  border: 1px solid #e3e3e3;
+  background: #fff;
+  text-align: center;
+}
+
+.badge-photo {
+  position: relative;
+  display: grid;
+  width: 100%;
+  height: min(58dvh, 500px);
+  min-height: 270px;
+  overflow: hidden;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  background: #f7f7f7;
+  cursor: pointer;
+}
+
+.badge-photo img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.photo-placeholder {
+  display: grid;
+  justify-items: center;
+  gap: 9px;
+  color: #111;
+  font-size: 14px;
+}
+
+.photo-plus {
+  display: grid;
+  width: 38px;
+  height: 38px;
+  place-items: center;
+  border: 1px solid #111;
+  border-radius: 50%;
+  font-size: 24px;
+  font-weight: 300;
+}
+
+.photo-action {
+  position: absolute;
+  right: 12px;
+  bottom: 12px;
+  padding: 8px 10px;
+  background: #fff;
+  color: #111;
+  font-size: 12px;
+}
+
+.badge-name {
+  padding: 22px 18px 24px;
+  color: #111;
+  font-size: clamp(24px, 6vw, 32px);
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  clip-path: inset(50%);
+}
+
+.edit-profile-button {
+  margin-top: 16px;
+  text-decoration: underline;
+  text-underline-offset: 4px;
+}
+
+.profile-edit {
+  display: grid;
+  width: min(100%, 370px);
+  gap: 8px;
+  margin-top: 18px;
+  font-size: 14px;
+}
+
+.profile-edit input {
+  width: 100%;
+  min-height: 42px;
+  padding: 9px 10px;
+  border: 1px solid #bbb;
+  border-radius: 3px;
+  color: #111;
+}
+
+.form-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 18px;
+  margin-top: 5px;
+}
+
+.record-page,
+.notes-page {
+  width: min(100%, 520px);
+  min-height: calc(100dvh - 130px);
+  margin: 0 auto;
+  padding: 34px 24px;
+}
+
+.record-page h1,
+.notes-page h1 {
+  margin-bottom: 26px;
+}
+
+.record-button {
+  display: inline-flex;
+  min-height: 48px;
+  align-items: center;
+  gap: 11px;
+  padding: 0 18px;
+  border: 1px solid #111;
+  border-radius: 4px;
+  background: #fff;
+  cursor: pointer;
+  font-size: 14px;
+}
+
+.record-button.is-recording {
+  background: #111;
+  color: #fff;
+}
+
+.record-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #111;
+}
+
+.is-recording .record-dot {
+  background: #fff;
+  animation: pulse 1.2s ease-in-out infinite;
+}
+
+.transcript {
+  margin-top: 34px;
+}
+
+.transcript h2 {
+  margin: 0 0 12px;
+  font-size: 17px;
+  font-weight: 600;
+}
+
+.transcript p {
+  margin: 0;
+  font-size: 15px;
+  line-height: 1.7;
+  white-space: pre-wrap;
+}
+
+.app-error {
+  position: fixed;
+  z-index: 2;
+  right: 16px;
+  bottom: calc(82px + env(safe-area-inset-bottom));
+  left: 16px;
+  width: max-content;
+  max-width: calc(100% - 32px);
+  margin: 0 auto;
+  padding: 11px 14px;
+  border: 1px solid #e2b8b5;
+  background: #fff;
+  color: #a12620;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.bottom-nav {
+  position: fixed;
+  z-index: 3;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  display: grid;
+  min-height: calc(64px + env(safe-area-inset-bottom));
+  grid-template-columns: repeat(3, 1fr);
+  padding: 0 max(12px, env(safe-area-inset-right)) env(safe-area-inset-bottom)
+    max(12px, env(safe-area-inset-left));
+  border-top: 1px solid #e7e7e7;
+  background: #fff;
+}
+
+.nav-tab {
+  position: relative;
+  border: 0;
+  background: transparent;
+  color: #777;
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.nav-tab.is-active {
+  color: #111;
+  font-weight: 700;
+}
+
+.nav-tab.is-active::before {
+  position: absolute;
+  top: -1px;
+  right: 25%;
+  left: 25%;
+  height: 2px;
+  background: #111;
+  content: "";
+}
+
+@keyframes pulse {
+  50% {
+    opacity: 0.35;
+  }
+}
+
+@media (max-height: 620px) {
+  .profile-page {
+    justify-content: flex-start;
+  }
+
+  .badge-photo {
+    height: 48dvh;
+    min-height: 210px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
   }
 }

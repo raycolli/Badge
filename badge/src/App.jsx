@@ -1,5 +1,7 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { supabase } from "./supabase.js";
+
+const TABS = ["Profile", "Record", "Notes"];
 
 function GoogleMark() {
   return (
@@ -25,25 +27,391 @@ function GoogleMark() {
   );
 }
 
+function ProfilePage({ user, onError }) {
+  const [name, setName] = useState("");
+  const [draftName, setDraftName] = useState("");
+  const [editing, setEditing] = useState(false);
+  const [photoUrl, setPhotoUrl] = useState("");
+  const [photoPath, setPhotoPath] = useState(null);
+  const [saving, setSaving] = useState(false);
+  const fileInput = useRef(null);
+
+  useEffect(() => {
+    let active = true;
+    const metadata = user.user_metadata ?? {};
+    const defaultName =
+      metadata.full_name || metadata.name || user.email?.split("@")[0] || "";
+    setName(defaultName);
+    setDraftName(defaultName);
+    setEditing(false);
+    setPhotoUrl("");
+    setPhotoPath(null);
+    onError("");
+
+    async function loadProfile() {
+      const { data: profile, error } = await supabase
+        .from("profiles")
+        .select("display_name, avatar_path")
+        .eq("user_id", user.id)
+        .maybeSingle();
+
+      if (!active) return;
+      if (error) {
+        onError(`Could not load your profile: ${error.message}`);
+        return;
+      }
+
+      if (!profile) {
+        const { error: insertError } = await supabase.from("profiles").insert({
+          user_id: user.id,
+          display_name: defaultName,
+        });
+        if (!active) return;
+        if (insertError) {
+          onError(`Could not create your profile: ${insertError.message}`);
+          return;
+        }
+      } else {
+        setName(profile.display_name);
+        setDraftName(profile.display_name);
+        setPhotoPath(profile.avatar_path);
+      }
+
+      const savedPhotoPath = profile?.avatar_path;
+      if (savedPhotoPath) {
+        const { data, error: photoError } = await supabase.storage
+          .from("profile-photos")
+          .createSignedUrl(savedPhotoPath, 60 * 60);
+        if (!active) return;
+        if (photoError) {
+          onError(`Could not load your profile photo: ${photoError.message}`);
+          return;
+        }
+        setPhotoUrl(data.signedUrl);
+      }
+    }
+
+    void loadProfile();
+
+    return () => {
+      active = false;
+    };
+  }, [user.id, user.user_metadata, user.email, onError]);
+
+  async function saveName(event) {
+    event.preventDefault();
+    const cleanName = draftName.trim();
+    if (!cleanName) {
+      onError("Enter your name before saving.");
+      return;
+    }
+
+    setSaving(true);
+    onError("");
+    const { error } = await supabase.from("profiles").upsert(
+      {
+        user_id: user.id,
+        display_name: cleanName,
+        avatar_path: photoPath,
+      },
+      { onConflict: "user_id" },
+    );
+    setSaving(false);
+
+    if (error) {
+      onError(error.message);
+      return;
+    }
+
+    setName(cleanName);
+    setEditing(false);
+  }
+
+  async function uploadPhoto(event) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+
+    if (!["image/jpeg", "image/png", "image/webp"].includes(file.type)) {
+      onError("Choose a JPG, PNG, or WebP image.");
+      return;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      onError("Choose an image smaller than 5 MB.");
+      return;
+    }
+
+    setSaving(true);
+    onError("");
+    const extension = file.type.split("/")[1].replace("jpeg", "jpg");
+    const path = `${user.id}/profile.${extension}`;
+    const { error: uploadError } = await supabase.storage
+      .from("profile-photos")
+      .upload(path, file, { upsert: true, contentType: file.type });
+
+    if (uploadError) {
+      setSaving(false);
+      onError(uploadError.message);
+      return;
+    }
+
+    const { error: profileError } = await supabase.from("profiles").upsert(
+      {
+        user_id: user.id,
+        display_name: name,
+        avatar_path: path,
+      },
+      { onConflict: "user_id" },
+    );
+    const { data, error: urlError } = await supabase.storage
+      .from("profile-photos")
+      .createSignedUrl(path, 60 * 60);
+    setSaving(false);
+
+    if (profileError || urlError) {
+      onError(
+        `Photo uploaded, but profile update failed: ${
+          profileError?.message || urlError.message
+        }`,
+      );
+      return;
+    }
+    setPhotoPath(path);
+    setPhotoUrl(data.signedUrl);
+  }
+
+  return (
+    <section className="profile-page" aria-label="Profile">
+      <article className="badge-card">
+        <button
+          className="badge-photo"
+          type="button"
+          onClick={() => fileInput.current?.click()}
+          disabled={saving}
+          aria-label={photoUrl ? "Change profile photo" : "Add profile photo"}
+        >
+          {photoUrl ? (
+            <img src={photoUrl} alt="Your profile" />
+          ) : (
+            <span className="photo-placeholder">
+              <span className="photo-plus" aria-hidden="true">+</span>
+              Add photo
+            </span>
+          )}
+          {photoUrl && <span className="photo-action">Change photo</span>}
+        </button>
+        <input
+          ref={fileInput}
+          className="visually-hidden"
+          type="file"
+          accept="image/jpeg,image/png,image/webp"
+          onChange={uploadPhoto}
+          aria-label="Choose profile photo"
+        />
+        <div className="badge-name">
+          {name || "Your name"}
+        </div>
+      </article>
+
+      {editing ? (
+        <form className="profile-edit" onSubmit={saveName}>
+          <label htmlFor="profile-name">Name</label>
+          <input
+            id="profile-name"
+            autoComplete="name"
+            maxLength={80}
+            value={draftName}
+            onChange={(event) => setDraftName(event.target.value)}
+          />
+          <div className="form-actions">
+            <button
+              className="plain-button"
+              type="button"
+              onClick={() => {
+                setDraftName(name);
+                setEditing(false);
+              }}
+            >
+              Cancel
+            </button>
+            <button className="plain-button" type="submit" disabled={saving}>
+              {saving ? "Saving…" : "Save"}
+            </button>
+          </div>
+        </form>
+      ) : (
+        <button
+          className="plain-button edit-profile-button"
+          type="button"
+          onClick={() => setEditing(true)}
+        >
+          Edit name
+        </button>
+      )}
+    </section>
+  );
+}
+
+function RecordPage({ onError }) {
+  const [recording, setRecording] = useState(false);
+  const [transcribing, setTranscribing] = useState(false);
+  const [transcript, setTranscript] = useState("");
+  const recorder = useRef(null);
+  const chunks = useRef([]);
+  const mounted = useRef(false);
+  const request = useRef(null);
+
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+      request.current?.abort();
+      if (recorder.current?.state !== "inactive") recorder.current?.stop();
+      recorder.current?.stream?.getTracks().forEach((track) => track.stop());
+    };
+  }, []);
+
+  async function transcribe(blob, mimeType) {
+    if (!blob.size) {
+      onError("No audio was captured. Try recording again.");
+      return;
+    }
+
+    const controller = new AbortController();
+    request.current = controller;
+    setTranscribing(true);
+    onError("");
+    try {
+      const {
+        data: { session },
+        error: sessionError,
+      } = await supabase.auth.getSession();
+      if (sessionError) throw sessionError;
+      if (!session) throw new Error("Sign in again to transcribe audio.");
+
+      const extension = mimeType.includes("mp4") ? "mp4" : "webm";
+      const formData = new FormData();
+      formData.append("audio", blob, `recording.${extension}`);
+      const response = await fetch("/api/transcribe", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${session.access_token}` },
+        body: formData,
+        signal: controller.signal,
+      });
+      const result = await response.json();
+      if (!response.ok) {
+        throw new Error(result.error || "Transcription failed.");
+      }
+      if (mounted.current) setTranscript(result.text);
+    } catch (error) {
+      if (mounted.current && error.name !== "AbortError") {
+        onError(error.message || "Transcription failed.");
+      }
+    } finally {
+      if (mounted.current) setTranscribing(false);
+    }
+  }
+
+  async function startRecording() {
+    onError("");
+    setTranscript("");
+
+    if (!navigator.mediaDevices?.getUserMedia || !window.MediaRecorder) {
+      onError("Audio recording is not supported in this browser.");
+      return;
+    }
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      if (!mounted.current) {
+        stream.getTracks().forEach((track) => track.stop());
+        return;
+      }
+      const mimeType = ["audio/webm;codecs=opus", "audio/webm", "audio/mp4"].find(
+        (type) => MediaRecorder.isTypeSupported(type),
+      );
+      const activeRecorder = new MediaRecorder(
+        stream,
+        mimeType ? { mimeType } : undefined,
+      );
+      chunks.current = [];
+      activeRecorder.ondataavailable = (event) => {
+        if (event.data.size) chunks.current.push(event.data);
+      };
+      activeRecorder.onstop = () => {
+        stream.getTracks().forEach((track) => track.stop());
+        if (!mounted.current) return;
+        void transcribe(
+          new Blob(chunks.current, {
+            type: activeRecorder.mimeType || "audio/webm",
+          }),
+          activeRecorder.mimeType || "audio/webm",
+        );
+      };
+      recorder.current = activeRecorder;
+      activeRecorder.start();
+      setRecording(true);
+    } catch (error) {
+      if (mounted.current) {
+        onError(error.message || "Could not access the microphone.");
+      }
+    }
+  }
+
+  function stopRecording() {
+    if (!recorder.current || recorder.current.state === "inactive") return;
+    recorder.current.stop();
+    setRecording(false);
+  }
+
+  return (
+    <section className="record-page" aria-labelledby="record-heading">
+      <h1 id="record-heading">Record</h1>
+      <button
+        className={`record-button${recording ? " is-recording" : ""}`}
+        type="button"
+        onClick={recording ? stopRecording : startRecording}
+        disabled={transcribing}
+      >
+        <span className="record-dot" aria-hidden="true" />
+        {recording
+          ? "Stop recording"
+          : transcribing
+            ? "Transcribing…"
+            : "Start recording"}
+      </button>
+      {transcript && (
+        <section className="transcript" aria-labelledby="transcript-heading">
+          <h2 id="transcript-heading">Transcript</h2>
+          <p>{transcript}</p>
+        </section>
+      )}
+    </section>
+  );
+}
+
 function App() {
   const [session, setSession] = useState(null);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [tab, setTab] = useState("Profile");
   const [error, setError] = useState("");
 
   useEffect(() => {
     let active = true;
-
     supabase.auth.getSession().then(({ data, error: sessionError }) => {
       if (!active) return;
       if (sessionError) setError(sessionError.message);
       setSession(data.session);
+      setLoading(false);
     });
 
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((_event, nextSession) => {
       setSession(nextSession);
+      setTab("Profile");
       setError("");
+      setLoading(false);
     });
 
     return () => {
@@ -55,14 +423,10 @@ function App() {
   async function signInWithGoogle() {
     setLoading(true);
     setError("");
-
     const { error: signInError } = await supabase.auth.signInWithOAuth({
       provider: "google",
-      options: {
-        redirectTo: window.location.origin,
-      },
+      options: { redirectTo: window.location.origin },
     });
-
     if (signInError) {
       setError(signInError.message);
       setLoading(false);
@@ -77,46 +441,65 @@ function App() {
     setLoading(false);
   }
 
+  if (loading) return <main className="page-shell" aria-label="Loading" />;
+
+  if (!session) {
+    return (
+      <main className="page-shell">
+        <section className="login-card" aria-labelledby="page-title">
+          <p className="welcome">Welcome</p>
+          <h1 id="page-title">Sign in</h1>
+          <button
+            className="google-button"
+            type="button"
+            onClick={signInWithGoogle}
+            disabled={loading}
+          >
+            <GoogleMark />
+            <span>{loading ? "Connecting…" : "Continue with Google"}</span>
+          </button>
+          {error && <p className="error-message" role="alert">{error}</p>}
+        </section>
+      </main>
+    );
+  }
+
   return (
-    <main className="page-shell">
-      <section className="login-card" aria-labelledby="page-title">
-        <p className="welcome">Welcome</p>
-        <h1 id="page-title">{session ? "Signed in" : "Sign in"}</h1>
+    <main className="app-shell">
+      <header className="app-header">
+        <button className="plain-button" type="button" onClick={signOut}>
+          Sign out
+        </button>
+      </header>
 
-        {session ? (
-          <div className="signed-in-panel">
-            <span className="account-email">{session.user.email}</span>
-            <button
-              className="text-button"
-              type="button"
-              onClick={signOut}
-              disabled={loading}
-            >
-              {loading ? "Signing out…" : "Sign out"}
-            </button>
-          </div>
-        ) : (
-          <div className="card-content">
-              <button
-                className="google-button"
-                type="button"
-                onClick={signInWithGoogle}
-                disabled={loading}
-              >
-                <GoogleMark />
-                <span>
-                  {loading ? "Connecting to Google…" : "Continue with Google"}
-                </span>
-              </button>
-          </div>
-        )}
+      {tab === "Profile" && (
+        <ProfilePage user={session.user} onError={setError} />
+      )}
+      {tab === "Record" && <RecordPage onError={setError} />}
+      {tab === "Notes" && (
+        <section className="notes-page" aria-labelledby="notes-heading">
+          <h1 id="notes-heading">Notes</h1>
+        </section>
+      )}
 
-        {error && (
-          <p className="error-message" role="alert">
-            {error}
-          </p>
-        )}
-      </section>
+      {error && <p className="app-error" role="alert">{error}</p>}
+
+      <nav className="bottom-nav" aria-label="Main navigation">
+        {TABS.map((item) => (
+          <button
+            key={item}
+            className={`nav-tab${tab === item ? " is-active" : ""}`}
+            type="button"
+            aria-current={tab === item ? "page" : undefined}
+            onClick={() => {
+              setTab(item);
+              setError("");
+            }}
+          >
+            {item}
+          </button>
+        ))}
+      </nav>
     </main>
   );
 }
