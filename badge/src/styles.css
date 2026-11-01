@@ -1,0 +1,129 @@
+:root {
+  font-family: Arial, sans-serif;
+  color: #202124;
+  background: #fff;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  min-width: 320px;
+  min-height: 100vh;
+  margin: 0;
+  background: #fff;
+}
+
+button {
+  font: inherit;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.page-shell {
+  display: grid;
+  min-height: 100vh;
+  place-items: center;
+  padding: 24px;
+}
+
+.login-card {
+  width: min(100%, 360px);
+  padding: 32px;
+  border: 1px solid #dadce0;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.welcome {
+  margin: 0 0 8px;
+  color: #5f6368;
+  font-size: 14px;
+}
+
+h1 {
+  margin: 0 0 24px;
+  font-size: 24px;
+  font-weight: 400;
+}
+
+.google-button {
+  display: flex;
+  width: 100%;
+  min-height: 48px;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 0 16px;
+  border: 1px solid #dadce0;
+  border-radius: 4px;
+  background: #fff;
+  color: #3c4043;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.google-button:hover:not(:disabled) {
+  background: #f8faff;
+  border-color: #c6cacf;
+}
+
+.google-button:focus-visible,
+.text-button:focus-visible {
+  outline: 2px solid #4285f4;
+  outline-offset: 2px;
+}
+
+.google-button:disabled,
+.text-button:disabled {
+  cursor: wait;
+  opacity: 0.65;
+}
+
+.google-mark {
+  width: 18px;
+  height: 18px;
+  flex: 0 0 auto;
+}
+
+.signed-in-panel {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.account-email {
+  overflow: hidden;
+  color: #5f6368;
+  font-size: 14px;
+  text-overflow: ellipsis;
+}
+
+.text-button {
+  padding: 8px 0 8px 8px;
+  border: 0;
+  background: transparent;
+  color: #1a73e8;
+  cursor: pointer;
+  font-size: 14px;
+  white-space: nowrap;
+}
+
+.error-message {
+  margin: 18px 0 0;
+  color: #b3261e;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+@media (max-width: 420px) {
+  .login-card {
+    padding: 24px;
+  }
+}
