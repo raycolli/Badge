@@ -257,7 +257,15 @@ const MAX_RECORDING_MS = 5 * 60 * 1000;
 function RecordPage({ onError, onSaved }) {
   const [recording, setRecording] = useState(false);
   const [transcribing, setTranscribing] = useState(false);
+  const [liveTranscript, setLiveTranscript] = useState("");
+  const [interimTranscript, setInterimTranscript] = useState("");
+  const [speechStatus, setSpeechStatus] = useState("");
   const recorder = useRef(null);
+  const speechRecognition = useRef(null);
+  const speechRestartTimer = useRef(null);
+  const recordingActive = useRef(false);
+  const liveRecognitionEnabled = useRef(false);
+  const finalTranscript = useRef("");
   const chunks = useRef([]);
   const mounted = useRef(false);
   const request = useRef(null);
@@ -269,6 +277,10 @@ function RecordPage({ onError, onSaved }) {
     return () => {
       mounted.current = false;
       window.clearTimeout(autoStopTimer.current);
+      window.clearTimeout(speechRestartTimer.current);
+      recordingActive.current = false;
+      liveRecognitionEnabled.current = false;
+      speechRecognition.current?.abort();
       request.current?.abort();
       if (recorder.current?.state !== "inactive") recorder.current?.stop();
       recorder.current?.stream?.getTracks().forEach((track) => track.stop());
@@ -293,7 +305,20 @@ function RecordPage({ onError, onSaved }) {
       if (sessionError) throw sessionError;
       if (!session) throw new Error("Sign in again to transcribe audio.");
 
-      const extension = mimeType.includes("mp4") ? "mp4" : "webm";
+      const mediaType = mimeType.split(";")[0].trim().toLowerCase();
+      const extensions = {
+        "audio/aac": "aac",
+        "audio/mp4": "mp4",
+        "audio/mpeg": "mp3",
+        "audio/ogg": "ogg",
+        "audio/wav": "wav",
+        "audio/webm": "webm",
+        "audio/x-wav": "wav",
+      };
+      const extension = extensions[mediaType];
+      if (!extension) {
+        throw new Error(`This browser recorded an unsupported audio format: ${mediaType || "unknown"}.`);
+      }
       const formData = new FormData();
       formData.append("audio", blob, `recording.${extension}`);
       formData.append("durationSeconds", String(durationSeconds));
@@ -303,7 +328,22 @@ function RecordPage({ onError, onSaved }) {
         body: formData,
         signal: controller.signal,
       });
-      const result = await response.json();
+      const responseText = await response.text();
+      let result;
+      try {
+        result = JSON.parse(responseText);
+      } catch {
+        if (response.status === 404 && !responseText.trim()) {
+          throw new Error(
+            "This browser tab is connected to an app server without the transcription API. Open the exact Vite URL printed by npm run dev from the badge folder (currently http://localhost:5173).",
+          );
+        }
+        throw new Error(
+          responseText.trim()
+            ? `The transcription server returned an invalid response (HTTP ${response.status}).`
+            : `The transcription server returned an empty response (HTTP ${response.status}). Check the terminal running npm run dev.`,
+        );
+      }
       if (!response.ok) {
         throw new Error(result.error || "Transcription failed.");
       }
@@ -338,33 +378,79 @@ function RecordPage({ onError, onSaved }) {
 
   async function startRecording() {
     onError("");
+    setSpeechStatus("");
+    setLiveTranscript("");
+    setInterimTranscript("");
+    finalTranscript.current = "";
 
     if (!navigator.mediaDevices?.getUserMedia || !window.MediaRecorder) {
       onError("Audio recording is not supported in this browser.");
       return;
     }
 
+    let stream;
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       if (!mounted.current) {
         stream.getTracks().forEach((track) => track.stop());
         return;
       }
-      const mimeType = ["audio/webm;codecs=opus", "audio/webm", "audio/mp4"].find(
-        (type) => MediaRecorder.isTypeSupported(type),
-      );
-      const activeRecorder = new MediaRecorder(
-        stream,
-        mimeType ? { mimeType } : undefined,
-      );
+      const supportedTypes = [
+        "audio/webm;codecs=opus",
+        "audio/mp4",
+        "audio/webm",
+      ];
+      let activeRecorder;
+      let requestedMimeType = "";
+      for (const type of supportedTypes) {
+        try {
+          if (!MediaRecorder.isTypeSupported(type)) continue;
+          activeRecorder = new MediaRecorder(stream, { mimeType: type });
+          requestedMimeType = type;
+          break;
+        } catch {
+          // A browser may report a format as supported but reject its exact codec string.
+        }
+      }
+      if (!activeRecorder) activeRecorder = new MediaRecorder(stream);
       chunks.current = [];
       activeRecorder.ondataavailable = (event) => {
         if (event.data.size) chunks.current.push(event.data);
       };
+      activeRecorder.onerror = (event) => {
+        window.clearTimeout(autoStopTimer.current);
+        recordingActive.current = false;
+        liveRecognitionEnabled.current = false;
+        stream.getTracks().forEach((track) => track.stop());
+        speechRecognition.current?.stop();
+        if (mounted.current) {
+          setRecording(false);
+          onError(
+            event.error?.message ||
+              "The browser could not record audio. Check microphone permissions and try again.",
+          );
+        }
+      };
       activeRecorder.onstop = () => {
         stream.getTracks().forEach((track) => track.stop());
         window.clearTimeout(autoStopTimer.current);
+        recordingActive.current = false;
+        liveRecognitionEnabled.current = false;
+        window.clearTimeout(speechRestartTimer.current);
+        speechRecognition.current?.stop();
         if (!mounted.current) return;
+        const recordedMimeType =
+          activeRecorder.mimeType ||
+          chunks.current.find((chunk) => chunk.type)?.type ||
+          requestedMimeType ||
+          (/\bSafari\//.test(navigator.userAgent) &&
+          !/\bChrome\//.test(navigator.userAgent)
+            ? "audio/mp4"
+            : "audio/webm");
+        if (!recordedMimeType) {
+          onError("The browser did not provide a recording audio format.");
+          return;
+        }
         const durationSeconds = Math.max(
           1,
           Math.min(
@@ -374,32 +460,119 @@ function RecordPage({ onError, onSaved }) {
         );
         void transcribe(
           new Blob(chunks.current, {
-            type: activeRecorder.mimeType || "audio/webm",
+            type: recordedMimeType,
           }),
-          activeRecorder.mimeType || "audio/webm",
+          recordedMimeType,
           durationSeconds,
         );
       };
       recorder.current = activeRecorder;
       recordingStartedAt.current = Date.now();
       activeRecorder.start();
+      recordingActive.current = true;
       setRecording(true);
+      startLiveTranscription();
       autoStopTimer.current = window.setTimeout(() => {
         if (recorder.current?.state === "recording") {
+          recordingActive.current = false;
           recorder.current.stop();
           setRecording(false);
         }
       }, MAX_RECORDING_MS);
     } catch (error) {
+      stream?.getTracks().forEach((track) => track.stop());
       if (mounted.current) {
         onError(error.message || "Could not access the microphone.");
       }
     }
   }
 
+  function startLiveTranscription() {
+    if (!recordingActive.current) return;
+    const Recognition =
+      window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!Recognition) {
+      setSpeechStatus(
+        "Live transcription isn't supported in this browser. A transcript will be created after you stop recording.",
+      );
+      return;
+    }
+
+    liveRecognitionEnabled.current = true;
+    try {
+      const recognition = new Recognition();
+      recognition.lang = navigator.language || "en-US";
+      recognition.continuous = true;
+      recognition.interimResults = true;
+      recognition.onresult = (event) => {
+        let interim = "";
+        for (let index = event.resultIndex; index < event.results.length; index += 1) {
+          const phrase = event.results[index][0].transcript.trim();
+          if (event.results[index].isFinal) {
+            finalTranscript.current = [
+              finalTranscript.current,
+              phrase,
+            ]
+              .filter(Boolean)
+              .join(" ");
+          } else {
+            interim = [interim, phrase].filter(Boolean).join(" ");
+          }
+        }
+        if (mounted.current) {
+          setLiveTranscript(finalTranscript.current);
+          setInterimTranscript(interim);
+        }
+      };
+      recognition.onerror = (event) => {
+        if (!mounted.current || !recordingActive.current) return;
+        if (
+          event.error === "not-allowed" ||
+          event.error === "service-not-allowed" ||
+          event.error === "network"
+        ) {
+          liveRecognitionEnabled.current = false;
+          setSpeechStatus(
+            "Live transcription is unavailable. Recording continues; a transcript will be created when you stop.",
+          );
+        } else if (event.error !== "no-speech" && event.error !== "aborted") {
+          liveRecognitionEnabled.current = false;
+          setSpeechStatus(
+            "Live transcription paused. Recording continues; a transcript will be created when you stop.",
+          );
+        }
+      };
+      recognition.onend = () => {
+        if (
+          !mounted.current ||
+          !recordingActive.current ||
+          !liveRecognitionEnabled.current
+        ) {
+          return;
+        }
+        speechRestartTimer.current = window.setTimeout(() => {
+          if (recordingActive.current && liveRecognitionEnabled.current) {
+            startLiveTranscription();
+          }
+        }, 300);
+      };
+      speechRecognition.current = recognition;
+      recognition.start();
+    } catch {
+      liveRecognitionEnabled.current = false;
+      setSpeechStatus(
+        "Live transcription couldn't start. Recording continues; a transcript will be created when you stop.",
+      );
+    }
+  }
+
   function stopRecording() {
     if (!recorder.current || recorder.current.state === "inactive") return;
     window.clearTimeout(autoStopTimer.current);
+    window.clearTimeout(speechRestartTimer.current);
+    recordingActive.current = false;
+    liveRecognitionEnabled.current = false;
+    speechRecognition.current?.stop();
     recorder.current.stop();
     setRecording(false);
   }
@@ -433,6 +606,26 @@ function RecordPage({ onError, onSaved }) {
           Creating transcript and insights…
         </p>
       )}
+      <section
+        className="live-transcript"
+        aria-labelledby="live-transcript-heading"
+        aria-live="polite"
+      >
+        <h2 id="live-transcript-heading">Live transcript</h2>
+        {speechStatus ? (
+          <p className="live-transcript-placeholder">{speechStatus}</p>
+        ) : liveTranscript || interimTranscript ? (
+          <p className="live-transcript-text">
+            {liveTranscript}
+            {liveTranscript && interimTranscript ? " " : ""}
+            <span className="interim-transcript">{interimTranscript}</span>
+          </p>
+        ) : (
+          <p className="live-transcript-placeholder">
+            
+          </p>
+        )}
+      </section>
     </section>
   );
 }

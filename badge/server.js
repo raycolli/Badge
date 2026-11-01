@@ -20,7 +20,8 @@ const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 25 * 1024 * 1024, files: 1 },
   fileFilter: (_request, file, callback) => {
-    if (!/^audio\/(webm|mp4|mpeg|wav|ogg|x-wav|aac)(;.*)?$/.test(file.mimetype)) {
+    const mediaType = file.mimetype.split(";")[0].trim().toLowerCase();
+    if (!/^audio\/(webm|mp4|mpeg|wav|ogg|x-wav|aac)$/.test(mediaType)) {
       callback(
         Object.assign(new Error("Upload a supported audio recording."), {
           status: 400,
@@ -85,7 +86,7 @@ app.post(
       const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
       const transcript = await openai.audio.transcriptions.create({
         file: new File([request.file.buffer], request.file.originalname, {
-          type: request.file.mimetype,
+          type: request.file.mimetype.split(";")[0].trim().toLowerCase(),
         }),
         model: "gpt-4o-mini-transcribe",
       });
@@ -127,11 +128,20 @@ app.post(
         key_highlights: insights.key_highlights.slice(0, 5),
       });
     } catch (error) {
-      console.error("Audio transcription failed:", error.message);
+      console.error("Audio transcription or insight generation failed:", {
+        status: error.status,
+        code: error.code,
+      });
+      const message =
+        error.status === 401
+          ? "OpenAI rejected the API key. Verify the server key and restart the app."
+          : error.status === 429
+            ? "OpenAI rate limit or usage limit reached. Check the project's billing and limits."
+            : `OpenAI transcription or insight generation failed${
+                error.status ? ` (HTTP ${error.status})` : ""
+              }. Check the terminal running npm run dev for details.`;
       next(
-        Object.assign(new Error("Audio transcription failed. Check the server configuration and try again."), {
-          status: 502,
-        }),
+        Object.assign(new Error(message), { status: 502 }),
       );
     }
   },
