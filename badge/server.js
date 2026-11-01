@@ -63,6 +63,17 @@ app.post(
       response.status(400).json({ error: "Choose an audio recording first." });
       return;
     }
+    const durationSeconds = Number(request.body.durationSeconds);
+    if (
+      !Number.isInteger(durationSeconds) ||
+      durationSeconds < 1 ||
+      durationSeconds > 300
+    ) {
+      response.status(400).json({
+        error: "Recording duration must be between 1 second and 5 minutes.",
+      });
+      return;
+    }
     if (!process.env.OPENAI_API_KEY) {
       response.status(503).json({
         error: "Add OPENAI_API_KEY to badge/.env to enable transcription.",
@@ -78,7 +89,43 @@ app.post(
         }),
         model: "gpt-4o-mini-transcribe",
       });
-      response.json({ text: transcript.text });
+      if (!transcript.text.trim()) {
+        response.status(422).json({ error: "No speech was detected." });
+        return;
+      }
+
+      const analysis = await openai.chat.completions.create({
+        model: "gpt-4o-mini",
+        response_format: { type: "json_object" },
+        messages: [
+          {
+            role: "system",
+            content:
+              "Analyze the conversation transcript. Return a JSON object with an executive_summary string and key_highlights array of 3 to 5 concise strings. Be factual, neutral, and concise. Do not invent details. If the conversation has no clear action items, summarize its main points instead.",
+          },
+          { role: "user", content: transcript.text },
+        ],
+      });
+      const content = analysis.choices[0]?.message.content;
+      if (!content) throw new Error("The AI returned an empty summary.");
+      const insights = JSON.parse(content);
+      if (
+        typeof insights.executive_summary !== "string" ||
+        !insights.executive_summary.trim() ||
+        !Array.isArray(insights.key_highlights) ||
+        insights.key_highlights.length < 3 ||
+        insights.key_highlights.length > 5 ||
+        !insights.key_highlights.every(
+          (item) => typeof item === "string" && item.trim(),
+        )
+      ) {
+        throw new Error("The AI returned an invalid summary.");
+      }
+      response.json({
+        text: transcript.text,
+        executive_summary: insights.executive_summary,
+        key_highlights: insights.key_highlights.slice(0, 5),
+      });
     } catch (error) {
       console.error("Audio transcription failed:", error.message);
       next(

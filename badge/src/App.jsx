@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { supabase } from "./supabase.js";
 
-const TABS = ["Profile", "Record", "Notes"];
+const TABS = ["Profile", "Record", "Insights"];
 
 function GoogleMark() {
   return (
@@ -252,26 +252,30 @@ function ProfilePage({ user, onError }) {
   );
 }
 
-function RecordPage({ onError }) {
+const MAX_RECORDING_MS = 5 * 60 * 1000;
+
+function RecordPage({ onError, onSaved }) {
   const [recording, setRecording] = useState(false);
   const [transcribing, setTranscribing] = useState(false);
-  const [transcript, setTranscript] = useState("");
   const recorder = useRef(null);
   const chunks = useRef([]);
   const mounted = useRef(false);
   const request = useRef(null);
+  const autoStopTimer = useRef(null);
+  const recordingStartedAt = useRef(0);
 
   useEffect(() => {
     mounted.current = true;
     return () => {
       mounted.current = false;
+      window.clearTimeout(autoStopTimer.current);
       request.current?.abort();
       if (recorder.current?.state !== "inactive") recorder.current?.stop();
       recorder.current?.stream?.getTracks().forEach((track) => track.stop());
     };
   }, []);
 
-  async function transcribe(blob, mimeType) {
+  async function transcribe(blob, mimeType, durationSeconds) {
     if (!blob.size) {
       onError("No audio was captured. Try recording again.");
       return;
@@ -292,6 +296,7 @@ function RecordPage({ onError }) {
       const extension = mimeType.includes("mp4") ? "mp4" : "webm";
       const formData = new FormData();
       formData.append("audio", blob, `recording.${extension}`);
+      formData.append("durationSeconds", String(durationSeconds));
       const response = await fetch("/api/transcribe", {
         method: "POST",
         headers: { Authorization: `Bearer ${session.access_token}` },
@@ -302,7 +307,26 @@ function RecordPage({ onError }) {
       if (!response.ok) {
         throw new Error(result.error || "Transcription failed.");
       }
-      if (mounted.current) setTranscript(result.text);
+      if (!result.text?.trim()) {
+        throw new Error("No speech was detected in that recording.");
+      }
+
+      const { data: savedRecording, error: saveError } = await supabase
+        .from("recordings")
+        .insert({
+          user_id: session.user.id,
+          duration_seconds: durationSeconds,
+          transcript: result.text,
+          executive_summary: result.executive_summary,
+          key_highlights: result.key_highlights,
+        })
+        .select("id")
+        .single();
+
+      if (saveError) {
+        throw new Error(`Transcript created, but could not save it: ${saveError.message}`);
+      }
+      if (mounted.current) onSaved(savedRecording.id);
     } catch (error) {
       if (mounted.current && error.name !== "AbortError") {
         onError(error.message || "Transcription failed.");
@@ -314,7 +338,6 @@ function RecordPage({ onError }) {
 
   async function startRecording() {
     onError("");
-    setTranscript("");
 
     if (!navigator.mediaDevices?.getUserMedia || !window.MediaRecorder) {
       onError("Audio recording is not supported in this browser.");
@@ -340,17 +363,33 @@ function RecordPage({ onError }) {
       };
       activeRecorder.onstop = () => {
         stream.getTracks().forEach((track) => track.stop());
+        window.clearTimeout(autoStopTimer.current);
         if (!mounted.current) return;
+        const durationSeconds = Math.max(
+          1,
+          Math.min(
+            300,
+            Math.ceil((Date.now() - recordingStartedAt.current) / 1000),
+          ),
+        );
         void transcribe(
           new Blob(chunks.current, {
             type: activeRecorder.mimeType || "audio/webm",
           }),
           activeRecorder.mimeType || "audio/webm",
+          durationSeconds,
         );
       };
       recorder.current = activeRecorder;
+      recordingStartedAt.current = Date.now();
       activeRecorder.start();
       setRecording(true);
+      autoStopTimer.current = window.setTimeout(() => {
+        if (recorder.current?.state === "recording") {
+          recorder.current.stop();
+          setRecording(false);
+        }
+      }, MAX_RECORDING_MS);
     } catch (error) {
       if (mounted.current) {
         onError(error.message || "Could not access the microphone.");
@@ -360,13 +399,17 @@ function RecordPage({ onError }) {
 
   function stopRecording() {
     if (!recorder.current || recorder.current.state === "inactive") return;
+    window.clearTimeout(autoStopTimer.current);
     recorder.current.stop();
     setRecording(false);
   }
 
   return (
     <section className="record-page" aria-labelledby="record-heading">
-      <h1 id="record-heading">Record</h1>
+      <h1 id="record-heading">Record Conversation</h1>
+      <p className="record-description">
+        Capture up to 5 minutes. Recording stops automatically at the limit.
+      </p>
       <button
         className={`record-button${recording ? " is-recording" : ""}`}
         type="button"
@@ -378,14 +421,163 @@ function RecordPage({ onError }) {
           ? "Stop recording"
           : transcribing
             ? "Transcribing…"
-            : "Start recording"}
+            : "Start Recording"}
       </button>
-      {transcript && (
-        <section className="transcript" aria-labelledby="transcript-heading">
-          <h2 id="transcript-heading">Transcript</h2>
-          <p>{transcript}</p>
-        </section>
+      {recording && (
+        <p className="recording-status" role="status">
+          Recording in progress
+        </p>
       )}
+      {transcribing && (
+        <p className="recording-status" role="status">
+          Creating transcript and insights…
+        </p>
+      )}
+    </section>
+  );
+}
+
+function formatRecordingDate(value) {
+  return new Intl.DateTimeFormat(undefined, {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(new Date(value));
+}
+
+function formatRecordingDuration(seconds) {
+  const minutes = Math.floor(seconds / 60);
+  const remainingSeconds = seconds % 60;
+  return `${minutes}:${String(remainingSeconds).padStart(2, "0")}`;
+}
+
+function InsightsPage({ selectedId, onSelect, onError }) {
+  const [recordings, setRecordings] = useState([]);
+  const [loadingRecordings, setLoadingRecordings] = useState(true);
+
+  useEffect(() => {
+    let active = true;
+
+    async function loadRecordings() {
+      const { data, error } = await supabase
+        .from("recordings")
+        .select(
+          "id, created_at, duration_seconds, transcript, executive_summary, key_highlights",
+        )
+        .order("created_at", { ascending: false });
+
+      if (!active) return;
+      setLoadingRecordings(false);
+      if (error) {
+        onError(`Could not load recordings: ${error.message}`);
+        return;
+      }
+
+      setRecordings(data);
+      if (!selectedId && data.length) onSelect(data[0].id);
+      if (selectedId && !data.some((recording) => recording.id === selectedId)) {
+        onSelect(data[0]?.id ?? null);
+      }
+    }
+
+    void loadRecordings();
+    return () => {
+      active = false;
+    };
+  }, [selectedId, onError, onSelect]);
+
+  const selectedRecording =
+    recordings.find((recording) => recording.id === selectedId) ??
+    recordings[0] ??
+    null;
+
+  return (
+    <section className="insights-page" aria-labelledby="insights-heading">
+      <header className="insights-header">
+        <div>
+          <h1 id="insights-heading">Insights</h1>
+        </div>
+        <span className="recording-count">
+          {recordings.length} {recordings.length === 1 ? "recording" : "recordings"}
+        </span>
+      </header>
+
+      <div className="insights-layout">
+        <aside className="recording-sidebar" aria-label="Recordings">
+          <h2>Recordings</h2>
+          {loadingRecordings ? (
+            <p className="sidebar-message">Loading recordings…</p>
+          ) : recordings.length ? (
+            <ul className="recording-list">
+              {recordings.map((recording) => (
+                <li key={recording.id}>
+                  <button
+                    className={`recording-list-item${
+                      selectedRecording?.id === recording.id ? " is-selected" : ""
+                    }`}
+                    type="button"
+                    aria-current={
+                      selectedRecording?.id === recording.id ? "true" : undefined
+                    }
+                    onClick={() => onSelect(recording.id)}
+                  >
+                    <span className="recording-list-date">
+                      {formatRecordingDate(recording.created_at)}
+                    </span>
+                    <span className="recording-list-summary">
+                      {recording.executive_summary}
+                    </span>
+                    <span className="recording-list-duration">
+                      {formatRecordingDuration(recording.duration_seconds)}
+                    </span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="sidebar-message">Your recordings will appear here.</p>
+          )}
+        </aside>
+
+        <article className="insight-detail">
+          {selectedRecording ? (
+            <>
+              <div className="detail-meta">
+                <span>{formatRecordingDate(selectedRecording.created_at)}</span>
+                <span>
+                  {formatRecordingDuration(selectedRecording.duration_seconds)}
+                </span>
+              </div>
+              <section className="insight-section">
+                <h2>Executive Summary</h2>
+                <p className="executive-summary">
+                  {selectedRecording.executive_summary}
+                </p>
+              </section>
+              <section className="insight-section">
+                <h2>Key Highlights</h2>
+                <ul className="highlight-list">
+                  {selectedRecording.key_highlights.map((highlight, index) => (
+                    <li key={`${index}-${highlight}`}>{highlight}</li>
+                  ))}
+                </ul>
+              </section>
+              <section className="insight-section conversation-section">
+                <h2>Conversation History</h2>
+                <p className="conversation-transcript">
+                  {selectedRecording.transcript}
+                </p>
+              </section>
+            </>
+          ) : (
+            <div className="empty-insights">
+              <h2>{loadingRecordings ? "Loading insights…" : "No recordings yet"}</h2>
+              {!loadingRecordings && (
+                <p>Record a conversation to see its summary and transcript here.</p>
+              )}
+            </div>
+          )}
+        </article>
+      </div>
     </section>
   );
 }
@@ -395,6 +587,7 @@ function App() {
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState("Profile");
   const [error, setError] = useState("");
+  const [selectedRecordingId, setSelectedRecordingId] = useState(null);
 
   useEffect(() => {
     let active = true;
@@ -465,7 +658,7 @@ function App() {
   }
 
   return (
-    <main className="app-shell">
+    <main className={`app-shell${tab === "Insights" ? " insights-open" : ""}`}>
       <header className="app-header">
         <button className="plain-button" type="button" onClick={signOut}>
           Sign out
@@ -475,11 +668,21 @@ function App() {
       {tab === "Profile" && (
         <ProfilePage user={session.user} onError={setError} />
       )}
-      {tab === "Record" && <RecordPage onError={setError} />}
-      {tab === "Notes" && (
-        <section className="notes-page" aria-labelledby="notes-heading">
-          <h1 id="notes-heading">Notes</h1>
-        </section>
+      {tab === "Record" && (
+        <RecordPage
+          onError={setError}
+          onSaved={(id) => {
+            setSelectedRecordingId(id);
+            setTab("Insights");
+          }}
+        />
+      )}
+      {tab === "Insights" && (
+        <InsightsPage
+          selectedId={selectedRecordingId}
+          onSelect={setSelectedRecordingId}
+          onError={setError}
+        />
       )}
 
       {error && <p className="app-error" role="alert">{error}</p>}
