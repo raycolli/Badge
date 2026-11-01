@@ -622,7 +622,7 @@ function RecordPage({ onError, onSaved }) {
           </p>
         ) : (
           <p className="live-transcript-placeholder">
-            Your words will appear here while you speak.
+            
           </p>
         )}
       </section>
