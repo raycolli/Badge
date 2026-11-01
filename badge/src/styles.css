@@ -306,6 +306,35 @@ h1 {
   font-size: 14px;
 }
 
+.live-transcript {
+  margin-top: 32px;
+  padding-top: 20px;
+  border-top: 1px solid #e7e7e7;
+}
+
+.live-transcript h2 {
+  margin: 0 0 12px;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.live-transcript-text,
+.live-transcript-placeholder {
+  max-width: 720px;
+  margin: 0;
+  font-size: 15px;
+  line-height: 1.75;
+  white-space: pre-wrap;
+}
+
+.live-transcript-placeholder {
+  color: #777;
+}
+
+.interim-transcript {
+  color: #777;
+}
+
 .insights-open {
   display: flex;
   height: 100dvh;
