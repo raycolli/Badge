@@ -119,7 +119,7 @@ h1 {
 
 .app-header {
   display: flex;
-  width: min(100%, 680px);
+  width: min(100%, 1440px);
   height: 56px;
   align-items: center;
   justify-content: flex-end;
