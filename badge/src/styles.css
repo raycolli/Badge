@@ -20,7 +20,8 @@ body {
 }
 
 button,
-input {
+input,
+textarea {
   font: inherit;
   -webkit-tap-highlight-color: transparent;
 }
@@ -82,7 +83,9 @@ h1 {
 .plain-button:focus-visible,
 .record-button:focus-visible,
 .nav-tab:focus-visible,
-.badge-photo:focus-visible {
+.badge-photo:focus-visible,
+.contact-search input:focus-visible,
+.summary-editor:focus-visible {
   outline: 2px solid #111;
   outline-offset: 3px;
 }
@@ -406,9 +409,24 @@ h1 {
 
 .recording-sidebar > h2 {
   margin: 0;
-  padding: 19px 18px 14px;
+  padding: 19px 18px 10px;
   font-size: 13px;
   font-weight: 600;
+}
+
+.contact-search {
+  display: block;
+  padding: 0 12px 12px;
+}
+
+.contact-search input {
+  width: 100%;
+  min-height: 36px;
+  padding: 8px 10px;
+  border: 1px solid #d5d5d5;
+  border-radius: 4px;
+  background: #fff;
+  font-size: 12px;
 }
 
 .sidebar-message {
@@ -591,6 +609,29 @@ h1 {
   color: #333;
   font-size: 14px;
   line-height: 1.75;
+}
+
+.summary-editor {
+  display: block;
+  width: 100%;
+  min-height: 145px;
+  padding: 11px 12px;
+  border: 1px solid #d5d5d5;
+  border-radius: 4px;
+  color: #333;
+  font-size: 14px;
+  line-height: 1.75;
+  resize: vertical;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  clip-path: inset(50%);
 }
 
 .highlight-list {

@@ -786,6 +786,10 @@ function ContactCard({ contact, onSave }) {
 function InsightsPage({ selectedId, onSelect, onError }) {
   const [recordings, setRecordings] = useState([]);
   const [loadingRecordings, setLoadingRecordings] = useState(true);
+  const [contactSearch, setContactSearch] = useState("");
+  const [editingSummary, setEditingSummary] = useState(false);
+  const [summaryDraft, setSummaryDraft] = useState("");
+  const [savingSummary, setSavingSummary] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -824,6 +828,47 @@ function InsightsPage({ selectedId, onSelect, onError }) {
     recordings[0] ??
     null;
 
+  useEffect(() => {
+    setSummaryDraft(selectedRecording?.executive_summary || "");
+    setEditingSummary(false);
+  }, [selectedRecording?.id, selectedRecording?.executive_summary]);
+
+  const filteredRecordings = recordings.filter((recording) => {
+    const query = contactSearch.trim().toLocaleLowerCase();
+    if (!query) return true;
+    return (recording.contacts || []).some((contact) =>
+      [contact.name, contact.role, contact.company]
+        .filter(Boolean)
+        .some((value) => value.toLocaleLowerCase().includes(query)),
+    );
+  });
+
+  async function saveSummary(event) {
+    event.preventDefault();
+    if (!selectedRecording) return;
+
+    setSavingSummary(true);
+    const summary = summaryDraft.trim();
+    const { error } = await supabase
+      .from("recordings")
+      .update({ executive_summary: summary })
+      .eq("id", selectedRecording.id);
+    setSavingSummary(false);
+    if (error) {
+      onError(`Could not update summary: ${error.message}`);
+      return;
+    }
+
+    setRecordings((current) =>
+      current.map((recording) =>
+        recording.id === selectedRecording.id
+          ? { ...recording, executive_summary: summary }
+          : recording,
+      ),
+    );
+    setEditingSummary(false);
+  }
+
   return (
     <section className="insights-page" aria-labelledby="insights-heading">
       <header className="insights-header">
@@ -836,13 +881,22 @@ function InsightsPage({ selectedId, onSelect, onError }) {
       </header>
 
       <div className="insights-layout">
-        <aside className="recording-sidebar" aria-label="Recordings">
-          <h2>Recordings</h2>
+        <aside className="recording-sidebar" aria-label="Contacts">
+          <h2>Contacts</h2>
+          <label className="contact-search">
+            <span className="visually-hidden">Search contacts</span>
+            <input
+              type="search"
+              value={contactSearch}
+              onChange={(event) => setContactSearch(event.target.value)}
+              placeholder="Search contacts"
+            />
+          </label>
           {loadingRecordings ? (
             <p className="sidebar-message">Loading recordings…</p>
-          ) : recordings.length ? (
+          ) : filteredRecordings.length ? (
             <ul className="recording-list">
-              {recordings.map((recording) => (
+              {filteredRecordings.map((recording) => (
                 <li key={recording.id}>
                   <button
                     className={`recording-list-item${
@@ -869,6 +923,8 @@ function InsightsPage({ selectedId, onSelect, onError }) {
                 </li>
               ))}
             </ul>
+          ) : recordings.length ? (
+            <p className="sidebar-message">No contacts match your search.</p>
           ) : (
             <p className="sidebar-message">Your recordings will appear here.</p>
           )}
@@ -963,10 +1019,58 @@ function InsightsPage({ selectedId, onSelect, onError }) {
                 )}
               </section>
               <section className="insight-section">
-                <h2>Summary</h2>
-                <p className="executive-summary">
-                  {selectedRecording.executive_summary}
-                </p>
+                <div className="section-heading-row">
+                  <h2>Summary</h2>
+                  {editingSummary ? (
+                    <div className="contact-actions">
+                      <button
+                        className="plain-button"
+                        type="button"
+                        disabled={savingSummary}
+                        onClick={() => {
+                          setSummaryDraft(selectedRecording.executive_summary || "");
+                          setEditingSummary(false);
+                        }}
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        className="plain-button"
+                        type="submit"
+                        form="summary-form"
+                        disabled={savingSummary}
+                      >
+                        {savingSummary ? "Saving…" : "Save"}
+                      </button>
+                    </div>
+                  ) : (
+                    <button
+                      className="plain-button"
+                      type="button"
+                      onClick={() => setEditingSummary(true)}
+                    >
+                      Edit
+                    </button>
+                  )}
+                </div>
+                {editingSummary ? (
+                  <form id="summary-form" onSubmit={saveSummary}>
+                    <label className="visually-hidden" htmlFor="summary-editor">
+                      Summary
+                    </label>
+                    <textarea
+                      id="summary-editor"
+                      className="summary-editor"
+                      value={summaryDraft}
+                      onChange={(event) => setSummaryDraft(event.target.value)}
+                      rows={6}
+                    />
+                  </form>
+                ) : (
+                  <p className="executive-summary">
+                    {selectedRecording.executive_summary}
+                  </p>
+                )}
               </section>
               <section className="insight-section">
                 <h2>Key Highlights</h2>
