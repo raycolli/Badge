@@ -741,7 +741,7 @@ function InsightsPage({ selectedId, onSelect, onError }) {
                 </span>
               </div>
               <section className="insight-section">
-                <h2>Executive Summary</h2>
+                <h2>Summary</h2>
                 <p className="executive-summary">
                   {selectedRecording.executive_summary}
                 </p>
