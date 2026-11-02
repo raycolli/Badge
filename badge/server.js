@@ -102,7 +102,7 @@ app.post(
           {
             role: "system",
             content:
-              "Analyze the conversation transcript. Return a JSON object with an executive_summary string and key_highlights array of 3 to 5 concise strings. Be factual, neutral, and concise. Do not invent details. If the conversation has no clear action items, summarize its main points instead.",
+              "Analyze the conversation transcript. Return a JSON object with an executive_summary string, a key_highlights array of 3 to 5 concise strings, and a contacts array. Each contact object has name, role, and company string fields; use an empty string when a field is not clearly stated. Include only people who are clearly identified as participants or meaningful contacts in the conversation, not hypothetical people or incidental mentions. Do not guess or invent names, roles, or companies. If none can be confidently identified, return an empty contacts array. Be factual and concise.",
           },
           { role: "user", content: transcript.text },
         ],
@@ -118,6 +118,18 @@ app.post(
         insights.key_highlights.length > 5 ||
         !insights.key_highlights.every(
           (item) => typeof item === "string" && item.trim(),
+        ) ||
+        !Array.isArray(insights.contacts) ||
+        insights.contacts.length > 10 ||
+        !insights.contacts.every(
+          (contact) =>
+            contact &&
+            typeof contact === "object" &&
+            ["name", "role", "company"].every(
+              (field) =>
+                typeof contact[field] === "string" &&
+                contact[field].length <= 120,
+            ),
         )
       ) {
         throw new Error("The AI returned an invalid summary.");
@@ -126,6 +138,11 @@ app.post(
         text: transcript.text,
         executive_summary: insights.executive_summary,
         key_highlights: insights.key_highlights.slice(0, 5),
+        contacts: insights.contacts.map((contact) => ({
+          name: contact.name.trim(),
+          role: contact.role.trim(),
+          company: contact.company.trim(),
+        })),
       });
     } catch (error) {
       console.error("Audio transcription or insight generation failed:", {

@@ -350,6 +350,11 @@ function RecordPage({ onError, onSaved }) {
       if (!result.text?.trim()) {
         throw new Error("No speech was detected in that recording.");
       }
+      if (!Array.isArray(result.contacts)) {
+        throw new Error(
+          "The transcription server is out of date. Stop and restart npm run dev, then try again.",
+        );
+      }
 
       const { data: savedRecording, error: saveError } = await supabase
         .from("recordings")
@@ -366,6 +371,24 @@ function RecordPage({ onError, onSaved }) {
       if (saveError) {
         throw new Error(`Transcript created, but could not save it: ${saveError.message}`);
       }
+
+      if (result.contacts.length) {
+        const { error: contactsError } = await supabase
+          .from("recording_contacts")
+          .insert(
+            result.contacts.map((contact) => ({
+              recording_id: savedRecording.id,
+              user_id: session.user.id,
+              ...contact,
+            })),
+          );
+        if (contactsError) {
+          throw new Error(
+            `Recording saved, but its contacts could not be saved: ${contactsError.message}`,
+          );
+        }
+      }
+
       if (mounted.current) onSaved(savedRecording.id);
     } catch (error) {
       if (mounted.current && error.name !== "AbortError") {
@@ -643,18 +666,136 @@ function formatRecordingDuration(seconds) {
   return `${minutes}:${String(remainingSeconds).padStart(2, "0")}`;
 }
 
+function contactLabel(contact) {
+  const identity = [contact.role, contact.name].filter(Boolean).join(" ");
+  if (identity && contact.company) return `${identity} @ ${contact.company}`;
+  return identity || contact.company || "Unknown person";
+}
+
+function ContactCard({ contact, onSave }) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState({
+    name: contact.name || "",
+    role: contact.role || "",
+    company: contact.company || "",
+  });
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    setDraft({
+      name: contact.name || "",
+      role: contact.role || "",
+      company: contact.company || "",
+    });
+  }, [contact.name, contact.role, contact.company]);
+
+  async function saveContact(event) {
+    event.preventDefault();
+    setSaving(true);
+    const saved = await onSave(contact.id, {
+      name: draft.name.trim(),
+      role: draft.role.trim(),
+      company: draft.company.trim(),
+    });
+    setSaving(false);
+    if (saved) setEditing(false);
+  }
+
+  return (
+    <article className="contact-card">
+      {editing ? (
+        <form className="contact-form" onSubmit={saveContact}>
+          <label>
+            Name
+            <input
+              autoComplete="off"
+              maxLength={120}
+              value={draft.name}
+              onChange={(event) =>
+                setDraft({ ...draft, name: event.target.value })
+              }
+              placeholder="Person's name"
+            />
+          </label>
+          <label>
+            Role
+            <input
+              autoComplete="off"
+              maxLength={120}
+              value={draft.role}
+              onChange={(event) =>
+                setDraft({ ...draft, role: event.target.value })
+              }
+              placeholder="Job title"
+            />
+          </label>
+          <label>
+            Company
+            <input
+              autoComplete="organization"
+              maxLength={120}
+              value={draft.company}
+              onChange={(event) =>
+                setDraft({ ...draft, company: event.target.value })
+              }
+              placeholder="Company"
+            />
+          </label>
+          <div className="contact-actions">
+            <button
+              className="plain-button"
+              type="button"
+              onClick={() => {
+                setDraft({
+                  name: contact.name || "",
+                  role: contact.role || "",
+                  company: contact.company || "",
+                });
+                setEditing(false);
+              }}
+              disabled={saving}
+            >
+              Cancel
+            </button>
+            <button className="plain-button" type="submit" disabled={saving}>
+              {saving ? "Saving…" : "Save"}
+            </button>
+          </div>
+        </form>
+      ) : (
+        <div className="contact-card-view">
+          <div>
+            <h3>{contactLabel(contact)}</h3>
+            {contact.role && contact.name && (
+              <p>{contact.company || "Company not specified"}</p>
+            )}
+          </div>
+          <button
+            className="plain-button"
+            type="button"
+            onClick={() => setEditing(true)}
+          >
+            Edit
+          </button>
+        </div>
+      )}
+    </article>
+  );
+}
+
 function InsightsPage({ selectedId, onSelect, onError }) {
   const [recordings, setRecordings] = useState([]);
   const [loadingRecordings, setLoadingRecordings] = useState(true);
 
   useEffect(() => {
     let active = true;
+    setLoadingRecordings(true);
 
     async function loadRecordings() {
       const { data, error } = await supabase
         .from("recordings")
         .select(
-          "id, created_at, duration_seconds, transcript, executive_summary, key_highlights",
+          "id, created_at, duration_seconds, transcript, executive_summary, key_highlights, contacts:recording_contacts(id, name, role, company)",
         )
         .order("created_at", { ascending: false });
 
@@ -717,7 +858,9 @@ function InsightsPage({ selectedId, onSelect, onError }) {
                       {formatRecordingDate(recording.created_at)}
                     </span>
                     <span className="recording-list-summary">
-                      {recording.executive_summary}
+                      {recording.contacts?.length
+                        ? recording.contacts.map(contactLabel).join(", ")
+                        : "No people identified"}
                     </span>
                     <span className="recording-list-duration">
                       {formatRecordingDuration(recording.duration_seconds)}
@@ -740,6 +883,85 @@ function InsightsPage({ selectedId, onSelect, onError }) {
                   {formatRecordingDuration(selectedRecording.duration_seconds)}
                 </span>
               </div>
+              <section className="insight-section people-section">
+                <div className="section-heading-row">
+                  <div>
+                    <p className="section-eyebrow">PEOPLE</p>
+                    <h2>Contacts</h2>
+                  </div>
+                  <button
+                    className="plain-button"
+                    type="button"
+                    onClick={async () => {
+                      const { data, error } = await supabase
+                        .from("recording_contacts")
+                        .insert({
+                          recording_id: selectedRecording.id,
+                          name: "",
+                          role: "",
+                          company: "",
+                        })
+                        .select("id, name, role, company")
+                        .single();
+                      if (error) {
+                        onError(`Could not add contact: ${error.message}`);
+                        return;
+                      }
+                      setRecordings((current) =>
+                        current.map((recording) =>
+                          recording.id === selectedRecording.id
+                            ? {
+                                ...recording,
+                                contacts: [...(recording.contacts || []), data],
+                              }
+                            : recording,
+                        ),
+                      );
+                    }}
+                  >
+                    Add person
+                  </button>
+                </div>
+                {selectedRecording.contacts?.length ? (
+                  <div className="contacts-list">
+                    {selectedRecording.contacts.map((contact) => (
+                      <ContactCard
+                        key={contact.id}
+                        contact={contact}
+                        onSave={async (contactId, updates) => {
+                          const { error } = await supabase
+                            .from("recording_contacts")
+                            .update(updates)
+                            .eq("id", contactId);
+                          if (error) {
+                            onError(`Could not update contact: ${error.message}`);
+                            return false;
+                          }
+                          setRecordings((current) =>
+                            current.map((recording) =>
+                              recording.id === selectedRecording.id
+                                ? {
+                                    ...recording,
+                                    contacts: recording.contacts.map((item) =>
+                                      item.id === contactId
+                                        ? { ...item, ...updates }
+                                        : item,
+                                    ),
+                                  }
+                                : recording,
+                            ),
+                          );
+                          return true;
+                        }}
+                      />
+                    ))}
+                  </div>
+                ) : (
+                  <p className="no-contacts">
+                    No contacts were identified. Add people from this conversation.
+                  </p>
+                )}
+              </section>
               <section className="insight-section">
                 <h2>Summary</h2>
                 <p className="executive-summary">
