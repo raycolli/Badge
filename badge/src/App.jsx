@@ -853,6 +853,33 @@ function InsightsPage({ selectedId, onSelect, onError }) {
     setEditingSummary(false);
   }, [selectedRecording?.id, selectedRecording?.executive_summary]);
 
+  async function saveContactUpdates(contactId, updates) {
+    if (!selectedContact) return false;
+    const recordingId = selectedContact.recording.id;
+    const { error } = await supabase
+      .from("recording_contacts")
+      .update(updates)
+      .eq("id", contactId);
+    if (error) {
+      onError(`Could not update contact: ${error.message}`);
+      return false;
+    }
+
+    setRecordings((current) =>
+      current.map((recording) =>
+        recording.id === recordingId
+          ? {
+              ...recording,
+              contacts: recording.contacts.map((item) =>
+                item.id === contactId ? { ...item, ...updates } : item,
+              ),
+            }
+          : recording,
+      ),
+    );
+    return true;
+  }
+
   async function saveSummary(event) {
     event.preventDefault();
     if (!selectedRecording) return;
@@ -1003,7 +1030,7 @@ function InsightsPage({ selectedId, onSelect, onError }) {
                           role: "",
                           company: "",
                         })
-                        .select("id, name, role, company")
+                            .select("id, name, role, company")
                         .single();
                       if (error) {
                         onError(`Could not add contact: ${error.message}`);
@@ -1029,31 +1056,7 @@ function InsightsPage({ selectedId, onSelect, onError }) {
                   <ContactCard
                     key={selectedContact.contact.id}
                     contact={selectedContact.contact}
-                    onSave={async (contactId, updates) => {
-                      const { error } = await supabase
-                        .from("recording_contacts")
-                        .update(updates)
-                        .eq("id", contactId);
-                      if (error) {
-                        onError(`Could not update contact: ${error.message}`);
-                        return false;
-                      }
-                      setRecordings((current) =>
-                        current.map((recording) =>
-                          recording.id === selectedRecording.id
-                            ? {
-                                ...recording,
-                                contacts: recording.contacts.map((item) =>
-                                  item.id === contactId
-                                    ? { ...item, ...updates }
-                                    : item,
-                                ),
-                              }
-                            : recording,
-                        ),
-                      );
-                      return true;
-                    }}
+                    onSave={saveContactUpdates}
                   />
                 ) : (
                   <p className="no-contacts">
