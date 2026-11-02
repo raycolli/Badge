@@ -519,12 +519,6 @@ h1 {
   letter-spacing: 1px;
 }
 
-.contacts-list {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr));
-  gap: 12px;
-}
-
 .contact-card {
   min-width: 0;
   padding: 16px;
@@ -790,10 +784,6 @@ h1 {
     min-height: 300px;
     overflow: visible;
     padding: 23px 20px 34px;
-  }
-
-  .contacts-list {
-    grid-template-columns: minmax(0, 1fr);
   }
 
   .record-page {

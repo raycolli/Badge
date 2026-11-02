@@ -787,6 +787,7 @@ function InsightsPage({ selectedId, onSelect, onError }) {
   const [recordings, setRecordings] = useState([]);
   const [loadingRecordings, setLoadingRecordings] = useState(true);
   const [contactSearch, setContactSearch] = useState("");
+  const [selectedContactId, setSelectedContactId] = useState(undefined);
   const [editingSummary, setEditingSummary] = useState(false);
   const [summaryDraft, setSummaryDraft] = useState("");
   const [savingSummary, setSavingSummary] = useState(false);
@@ -823,25 +824,34 @@ function InsightsPage({ selectedId, onSelect, onError }) {
     };
   }, [selectedId, onError, onSelect]);
 
+  const contacts = recordings.flatMap((recording) =>
+    (recording.contacts || []).map((contact) => ({ contact, recording })),
+  );
+  const selectedContact =
+    selectedContactId !== undefined
+      ? contacts.find(({ contact }) => contact.id === selectedContactId) ?? null
+      : contacts.find(({ recording }) => recording.id === selectedId) ??
+        contacts[0] ??
+        null;
   const selectedRecording =
+    selectedContact?.recording ??
     recordings.find((recording) => recording.id === selectedId) ??
     recordings[0] ??
     null;
+  const visibleContacts = contacts.filter(({ contact }) => {
+    const query = contactSearch.trim().toLocaleLowerCase();
+    return [contact.name, contact.role, contact.company]
+      .filter(Boolean)
+      .some((value) => value.toLocaleLowerCase().includes(query));
+  });
+  const recordingsWithoutContacts = recordings.filter(
+    (recording) => !recording.contacts?.length,
+  );
 
   useEffect(() => {
     setSummaryDraft(selectedRecording?.executive_summary || "");
     setEditingSummary(false);
   }, [selectedRecording?.id, selectedRecording?.executive_summary]);
-
-  const filteredRecordings = recordings.filter((recording) => {
-    const query = contactSearch.trim().toLocaleLowerCase();
-    if (!query) return true;
-    return (recording.contacts || []).some((contact) =>
-      [contact.name, contact.role, contact.company]
-        .filter(Boolean)
-        .some((value) => value.toLocaleLowerCase().includes(query)),
-    );
-  });
 
   async function saveSummary(event) {
     event.preventDefault();
@@ -894,27 +904,31 @@ function InsightsPage({ selectedId, onSelect, onError }) {
           </label>
           {loadingRecordings ? (
             <p className="sidebar-message">Loading recordings…</p>
-          ) : filteredRecordings.length ? (
+          ) : visibleContacts.length ||
+            (!contactSearch.trim() && recordingsWithoutContacts.length) ? (
             <ul className="recording-list">
-              {filteredRecordings.map((recording) => (
-                <li key={recording.id}>
+              {visibleContacts.map(({ contact, recording }) => (
+                <li key={contact.id}>
                   <button
                     className={`recording-list-item${
-                      selectedRecording?.id === recording.id ? " is-selected" : ""
+                      selectedContact?.contact.id === contact.id ? " is-selected" : ""
                     }`}
                     type="button"
                     aria-current={
-                      selectedRecording?.id === recording.id ? "true" : undefined
+                      selectedContact?.contact.id === contact.id
+                        ? "true"
+                        : undefined
                     }
-                    onClick={() => onSelect(recording.id)}
+                    onClick={() => {
+                      setSelectedContactId(contact.id);
+                      onSelect(recording.id);
+                    }}
                   >
                     <span className="recording-list-date">
                       {formatRecordingDate(recording.created_at)}
                     </span>
                     <span className="recording-list-summary">
-                      {recording.contacts?.length
-                        ? recording.contacts.map(contactLabel).join(", ")
-                        : "No people identified"}
+                      {contactLabel(contact)}
                     </span>
                     <span className="recording-list-duration">
                       {formatRecordingDuration(recording.duration_seconds)}
@@ -922,6 +936,38 @@ function InsightsPage({ selectedId, onSelect, onError }) {
                   </button>
                 </li>
               ))}
+              {!contactSearch.trim() &&
+                recordingsWithoutContacts.map((recording) => (
+                  <li key={recording.id}>
+                    <button
+                      className={`recording-list-item${
+                        !selectedContact && selectedRecording?.id === recording.id
+                          ? " is-selected"
+                          : ""
+                      }`}
+                      type="button"
+                      aria-current={
+                        !selectedContact && selectedRecording?.id === recording.id
+                          ? "true"
+                          : undefined
+                      }
+                      onClick={() => {
+                        setSelectedContactId(null);
+                        onSelect(recording.id);
+                      }}
+                    >
+                      <span className="recording-list-date">
+                        {formatRecordingDate(recording.created_at)}
+                      </span>
+                      <span className="recording-list-summary">
+                        No people identified
+                      </span>
+                      <span className="recording-list-duration">
+                        {formatRecordingDuration(recording.duration_seconds)}
+                      </span>
+                    </button>
+                  </li>
+                ))}
             </ul>
           ) : recordings.length ? (
             <p className="sidebar-message">No contacts match your search.</p>
@@ -942,8 +988,8 @@ function InsightsPage({ selectedId, onSelect, onError }) {
               <section className="insight-section people-section">
                 <div className="section-heading-row">
                   <div>
-                    <p className="section-eyebrow">PEOPLE</p>
-                    <h2>Contacts</h2>
+                    <p className="section-eyebrow"></p>
+                    <h2>Contact</h2>
                   </div>
                   <button
                     className="plain-button"
@@ -973,48 +1019,45 @@ function InsightsPage({ selectedId, onSelect, onError }) {
                             : recording,
                         ),
                       );
+                      setSelectedContactId(data.id);
                     }}
                   >
-                    Add person
+                    Add contact
                   </button>
                 </div>
-                {selectedRecording.contacts?.length ? (
-                  <div className="contacts-list">
-                    {selectedRecording.contacts.map((contact) => (
-                      <ContactCard
-                        key={contact.id}
-                        contact={contact}
-                        onSave={async (contactId, updates) => {
-                          const { error } = await supabase
-                            .from("recording_contacts")
-                            .update(updates)
-                            .eq("id", contactId);
-                          if (error) {
-                            onError(`Could not update contact: ${error.message}`);
-                            return false;
-                          }
-                          setRecordings((current) =>
-                            current.map((recording) =>
-                              recording.id === selectedRecording.id
-                                ? {
-                                    ...recording,
-                                    contacts: recording.contacts.map((item) =>
-                                      item.id === contactId
-                                        ? { ...item, ...updates }
-                                        : item,
-                                    ),
-                                  }
-                                : recording,
-                            ),
-                          );
-                          return true;
-                        }}
-                      />
-                    ))}
-                  </div>
+                {selectedContact ? (
+                  <ContactCard
+                    key={selectedContact.contact.id}
+                    contact={selectedContact.contact}
+                    onSave={async (contactId, updates) => {
+                      const { error } = await supabase
+                        .from("recording_contacts")
+                        .update(updates)
+                        .eq("id", contactId);
+                      if (error) {
+                        onError(`Could not update contact: ${error.message}`);
+                        return false;
+                      }
+                      setRecordings((current) =>
+                        current.map((recording) =>
+                          recording.id === selectedRecording.id
+                            ? {
+                                ...recording,
+                                contacts: recording.contacts.map((item) =>
+                                  item.id === contactId
+                                    ? { ...item, ...updates }
+                                    : item,
+                                ),
+                              }
+                            : recording,
+                        ),
+                      );
+                      return true;
+                    }}
+                  />
                 ) : (
                   <p className="no-contacts">
-                    No contacts were identified. Add people from this conversation.
+                    No contacts were identified. Add a contact from this conversation.
                   </p>
                 )}
               </section>
