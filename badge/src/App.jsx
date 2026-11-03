@@ -656,14 +656,7 @@ function RecordPage({ onError, onSaved }) {
 function formatRecordingDate(value) {
   return new Intl.DateTimeFormat(undefined, {
     dateStyle: "medium",
-    timeStyle: "short",
   }).format(new Date(value));
-}
-
-function formatRecordingDuration(seconds) {
-  const minutes = Math.floor(seconds / 60);
-  const remainingSeconds = seconds % 60;
-  return `${minutes}:${String(remainingSeconds).padStart(2, "0")}`;
 }
 
 function contactLabel(contact) {
@@ -796,6 +789,12 @@ function InsightsPage({ selectedId, onSelect, onError }) {
   const [editingSummary, setEditingSummary] = useState(false);
   const [summaryDraft, setSummaryDraft] = useState("");
   const [savingSummary, setSavingSummary] = useState(false);
+  const [editingHighlights, setEditingHighlights] = useState(false);
+  const [highlightsDraft, setHighlightsDraft] = useState("");
+  const [savingHighlights, setSavingHighlights] = useState(false);
+  const [editingTranscript, setEditingTranscript] = useState(false);
+  const [transcriptDraft, setTranscriptDraft] = useState("");
+  const [savingTranscript, setSavingTranscript] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -856,7 +855,16 @@ function InsightsPage({ selectedId, onSelect, onError }) {
   useEffect(() => {
     setSummaryDraft(selectedRecording?.executive_summary || "");
     setEditingSummary(false);
-  }, [selectedRecording?.id, selectedRecording?.executive_summary]);
+    setHighlightsDraft((selectedRecording?.key_highlights || []).join("\n"));
+    setEditingHighlights(false);
+    setTranscriptDraft(selectedRecording?.transcript || "");
+    setEditingTranscript(false);
+  }, [
+    selectedRecording?.id,
+    selectedRecording?.executive_summary,
+    selectedRecording?.key_highlights,
+    selectedRecording?.transcript,
+  ]);
 
   async function saveContactUpdates(contactId, updates) {
     if (!selectedContact) return false;
@@ -909,6 +917,54 @@ function InsightsPage({ selectedId, onSelect, onError }) {
       ),
     );
     setEditingSummary(false);
+  }
+
+  async function saveRecordingChanges(updates) {
+    if (!selectedRecording) return false;
+
+    const { error } = await supabase
+      .from("recordings")
+      .update(updates)
+      .eq("id", selectedRecording.id);
+    if (error) {
+      onError(`Could not update recording: ${error.message}`);
+      return false;
+    }
+
+    setRecordings((current) =>
+      current.map((recording) =>
+        recording.id === selectedRecording.id
+          ? { ...recording, ...updates }
+          : recording,
+      ),
+    );
+    return true;
+  }
+
+  async function saveHighlights(event) {
+    event.preventDefault();
+    setSavingHighlights(true);
+    const highlights = highlightsDraft
+      .split("\n")
+      .map((highlight) => highlight.trim())
+      .filter(Boolean);
+    const saved = await saveRecordingChanges({ key_highlights: highlights });
+    setSavingHighlights(false);
+    if (saved) setEditingHighlights(false);
+  }
+
+  async function saveTranscript(event) {
+    event.preventDefault();
+    const transcript = transcriptDraft.trim();
+    if (!transcript) {
+      onError("Conversation history cannot be empty.");
+      return;
+    }
+
+    setSavingTranscript(true);
+    const saved = await saveRecordingChanges({ transcript });
+    setSavingTranscript(false);
+    if (saved) setEditingTranscript(false);
   }
 
   return (
@@ -967,9 +1023,6 @@ function InsightsPage({ selectedId, onSelect, onError }) {
                         {contactRoleCompany(contact)}
                       </span>
                     )}
-                    <span className="recording-list-duration">
-                      {formatRecordingDuration(recording.duration_seconds)}
-                    </span>
                   </button>
                 </li>
               ))}
@@ -999,9 +1052,6 @@ function InsightsPage({ selectedId, onSelect, onError }) {
                       <span className="recording-list-summary">
                         No people identified
                       </span>
-                      <span className="recording-list-duration">
-                        {formatRecordingDuration(recording.duration_seconds)}
-                      </span>
                     </button>
                   </li>
                 ))}
@@ -1018,9 +1068,6 @@ function InsightsPage({ selectedId, onSelect, onError }) {
             <>
               <div className="detail-meta">
                 <span>{formatRecordingDate(selectedRecording.created_at)}</span>
-                <span>
-                  {formatRecordingDuration(selectedRecording.duration_seconds)}
-                </span>
               </div>
               <section className="insight-section people-section">
                 <div className="section-heading-row">
@@ -1129,18 +1176,120 @@ function InsightsPage({ selectedId, onSelect, onError }) {
                 )}
               </section>
               <section className="insight-section">
-                <h2>Key Highlights</h2>
-                <ul className="highlight-list">
-                  {selectedRecording.key_highlights.map((highlight, index) => (
-                    <li key={`${index}-${highlight}`}>{highlight}</li>
-                  ))}
-                </ul>
+                <div className="section-heading-row">
+                  <h2>Key Highlights</h2>
+                  {editingHighlights ? (
+                    <div className="contact-actions">
+                      <button
+                        className="plain-button"
+                        type="button"
+                        disabled={savingHighlights}
+                        onClick={() => {
+                          setHighlightsDraft(
+                            (selectedRecording.key_highlights || []).join("\n"),
+                          );
+                          setEditingHighlights(false);
+                        }}
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        className="plain-button"
+                        type="submit"
+                        form="highlights-form"
+                        disabled={savingHighlights}
+                      >
+                        {savingHighlights ? "Saving…" : "Save"}
+                      </button>
+                    </div>
+                  ) : (
+                    <button
+                      className="plain-button"
+                      type="button"
+                      onClick={() => setEditingHighlights(true)}
+                    >
+                      Edit
+                    </button>
+                  )}
+                </div>
+                {editingHighlights ? (
+                  <form id="highlights-form" onSubmit={saveHighlights}>
+                    <label className="visually-hidden" htmlFor="highlights-editor">
+                      Key Highlights, one per line
+                    </label>
+                    <textarea
+                      id="highlights-editor"
+                      className="recording-editor"
+                      value={highlightsDraft}
+                      onChange={(event) => setHighlightsDraft(event.target.value)}
+                      placeholder="Enter one highlight per line"
+                      rows={6}
+                    />
+                  </form>
+                ) : selectedRecording.key_highlights?.length ? (
+                  <ul className="highlight-list">
+                    {selectedRecording.key_highlights.map((highlight, index) => (
+                      <li key={`${index}-${highlight}`}>{highlight}</li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="executive-summary">No key highlights yet.</p>
+                )}
               </section>
               <section className="insight-section conversation-section">
-                <h2>Conversation History</h2>
-                <p className="conversation-transcript">
-                  {selectedRecording.transcript}
-                </p>
+                <div className="section-heading-row">
+                  <h2>Conversation History</h2>
+                  {editingTranscript ? (
+                    <div className="contact-actions">
+                      <button
+                        className="plain-button"
+                        type="button"
+                        disabled={savingTranscript}
+                        onClick={() => {
+                          setTranscriptDraft(selectedRecording.transcript || "");
+                          setEditingTranscript(false);
+                        }}
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        className="plain-button"
+                        type="submit"
+                        form="transcript-form"
+                        disabled={savingTranscript}
+                      >
+                        {savingTranscript ? "Saving…" : "Save"}
+                      </button>
+                    </div>
+                  ) : (
+                    <button
+                      className="plain-button"
+                      type="button"
+                      onClick={() => setEditingTranscript(true)}
+                    >
+                      Edit
+                    </button>
+                  )}
+                </div>
+                {editingTranscript ? (
+                  <form id="transcript-form" onSubmit={saveTranscript}>
+                    <label className="visually-hidden" htmlFor="transcript-editor">
+                      Conversation History
+                    </label>
+                    <textarea
+                      id="transcript-editor"
+                      className="recording-editor"
+                      value={transcriptDraft}
+                      onChange={(event) => setTranscriptDraft(event.target.value)}
+                      required
+                      rows={14}
+                    />
+                  </form>
+                ) : (
+                  <p className="conversation-transcript">
+                    {selectedRecording.transcript}
+                  </p>
+                )}
               </section>
             </>
           ) : (
