@@ -478,6 +478,15 @@ h1 {
   -webkit-line-clamp: 2;
 }
 
+.recording-list-role {
+  grid-column: 1 / -1;
+  overflow: hidden;
+  color: #727272;
+  font-size: 11px;
+  line-height: 1.4;
+  text-overflow: ellipsis;
+}
+
 .recording-list-duration {
   align-self: end;
   color: #777;
@@ -521,10 +530,7 @@ h1 {
 
 .contact-card {
   min-width: 0;
-  padding: 16px;
-  border: 1px solid #e4e4e4;
-  border-radius: 5px;
-  background: #fff;
+  padding: 0;
 }
 
 .contact-card-view {
@@ -532,6 +538,10 @@ h1 {
   align-items: flex-start;
   justify-content: space-between;
   gap: 16px;
+}
+
+.contact-card-view > .plain-button {
+  margin-right: 0;
 }
 
 .contact-card-view h3 {

@@ -667,9 +667,14 @@ function formatRecordingDuration(seconds) {
 }
 
 function contactLabel(contact) {
-  const identity = [contact.role, contact.name].filter(Boolean).join(" ");
-  if (identity && contact.company) return `${identity} @ ${contact.company}`;
-  return identity || contact.company || "Unknown person";
+  return contact.name || "Unknown person";
+}
+
+function contactRoleCompany(contact) {
+  if (contact.role && contact.company) {
+    return `${contact.role} @ ${contact.company}`;
+  }
+  return contact.role || contact.company || "";
 }
 
 function ContactCard({ contact, onSave }) {
@@ -766,8 +771,8 @@ function ContactCard({ contact, onSave }) {
         <div className="contact-card-view">
           <div>
             <h3>{contactLabel(contact)}</h3>
-            {contact.role && contact.name && (
-              <p>{contact.company || "Company not specified"}</p>
+            {contactRoleCompany(contact) && (
+              <p>{contactRoleCompany(contact)}</p>
             )}
           </div>
           <button
@@ -957,6 +962,11 @@ function InsightsPage({ selectedId, onSelect, onError }) {
                     <span className="recording-list-summary">
                       {contactLabel(contact)}
                     </span>
+                    {contactRoleCompany(contact) && (
+                      <span className="recording-list-role">
+                        {contactRoleCompany(contact)}
+                      </span>
+                    )}
                     <span className="recording-list-duration">
                       {formatRecordingDuration(recording.duration_seconds)}
                     </span>
