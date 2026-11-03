@@ -350,6 +350,11 @@ function RecordPage({ onError, onSaved }) {
       if (!result.text?.trim()) {
         throw new Error("No speech was detected in that recording.");
       }
+      if (!Array.isArray(result.contacts)) {
+        throw new Error(
+          "The transcription server is out of date. Stop and restart npm run dev, then try again.",
+        );
+      }
 
       const { data: savedRecording, error: saveError } = await supabase
         .from("recordings")
@@ -366,6 +371,24 @@ function RecordPage({ onError, onSaved }) {
       if (saveError) {
         throw new Error(`Transcript created, but could not save it: ${saveError.message}`);
       }
+
+      if (result.contacts.length) {
+        const { error: contactsError } = await supabase
+          .from("recording_contacts")
+          .insert(
+            result.contacts.map((contact) => ({
+              recording_id: savedRecording.id,
+              user_id: session.user.id,
+              ...contact,
+            })),
+          );
+        if (contactsError) {
+          throw new Error(
+            `Recording saved, but its contacts could not be saved: ${contactsError.message}`,
+          );
+        }
+      }
+
       if (mounted.current) onSaved(savedRecording.id);
     } catch (error) {
       if (mounted.current && error.name !== "AbortError") {
@@ -643,18 +666,146 @@ function formatRecordingDuration(seconds) {
   return `${minutes}:${String(remainingSeconds).padStart(2, "0")}`;
 }
 
+function contactLabel(contact) {
+  return contact.name || "Unknown person";
+}
+
+function contactRoleCompany(contact) {
+  if (contact.role && contact.company) {
+    return `${contact.role} @ ${contact.company}`;
+  }
+  return contact.role || contact.company || "";
+}
+
+function ContactCard({ contact, onSave }) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState({
+    name: contact.name || "",
+    role: contact.role || "",
+    company: contact.company || "",
+  });
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    setDraft({
+      name: contact.name || "",
+      role: contact.role || "",
+      company: contact.company || "",
+    });
+  }, [contact.name, contact.role, contact.company]);
+
+  async function saveContact(event) {
+    event.preventDefault();
+    setSaving(true);
+    const saved = await onSave(contact.id, {
+      name: draft.name.trim(),
+      role: draft.role.trim(),
+      company: draft.company.trim(),
+    });
+    setSaving(false);
+    if (saved) setEditing(false);
+  }
+
+  return (
+    <article className="contact-card">
+      {editing ? (
+        <form className="contact-form" onSubmit={saveContact}>
+          <label>
+            Name
+            <input
+              autoComplete="off"
+              maxLength={120}
+              value={draft.name}
+              onChange={(event) =>
+                setDraft({ ...draft, name: event.target.value })
+              }
+              placeholder="Person's name"
+            />
+          </label>
+          <label>
+            Role
+            <input
+              autoComplete="off"
+              maxLength={120}
+              value={draft.role}
+              onChange={(event) =>
+                setDraft({ ...draft, role: event.target.value })
+              }
+              placeholder="Job title"
+            />
+          </label>
+          <label>
+            Company
+            <input
+              autoComplete="organization"
+              maxLength={120}
+              value={draft.company}
+              onChange={(event) =>
+                setDraft({ ...draft, company: event.target.value })
+              }
+              placeholder="Company"
+            />
+          </label>
+          <div className="contact-actions">
+            <button
+              className="plain-button"
+              type="button"
+              onClick={() => {
+                setDraft({
+                  name: contact.name || "",
+                  role: contact.role || "",
+                  company: contact.company || "",
+                });
+                setEditing(false);
+              }}
+              disabled={saving}
+            >
+              Cancel
+            </button>
+            <button className="plain-button" type="submit" disabled={saving}>
+              {saving ? "Saving…" : "Save"}
+            </button>
+          </div>
+        </form>
+      ) : (
+        <div className="contact-card-view">
+          <div>
+            <h3>{contactLabel(contact)}</h3>
+            {contactRoleCompany(contact) && (
+              <p>{contactRoleCompany(contact)}</p>
+            )}
+          </div>
+          <button
+            className="plain-button"
+            type="button"
+            onClick={() => setEditing(true)}
+          >
+            Edit
+          </button>
+        </div>
+      )}
+    </article>
+  );
+}
+
 function InsightsPage({ selectedId, onSelect, onError }) {
   const [recordings, setRecordings] = useState([]);
   const [loadingRecordings, setLoadingRecordings] = useState(true);
+  const [contactSearch, setContactSearch] = useState("");
+  const [selectedContactId, setSelectedContactId] = useState(undefined);
+  const [editingSummary, setEditingSummary] = useState(false);
+  const [summaryDraft, setSummaryDraft] = useState("");
+  const [savingSummary, setSavingSummary] = useState(false);
 
   useEffect(() => {
     let active = true;
+    setLoadingRecordings(true);
 
     async function loadRecordings() {
       const { data, error } = await supabase
         .from("recordings")
         .select(
-          "id, created_at, duration_seconds, transcript, executive_summary, key_highlights",
+          "id, created_at, duration_seconds, transcript, executive_summary, key_highlights, contacts:recording_contacts(id, name, role, company)",
         )
         .order("created_at", { ascending: false });
 
@@ -678,10 +829,87 @@ function InsightsPage({ selectedId, onSelect, onError }) {
     };
   }, [selectedId, onError, onSelect]);
 
+  const contacts = recordings.flatMap((recording) =>
+    (recording.contacts || []).map((contact) => ({ contact, recording })),
+  );
+  const selectedContact =
+    selectedContactId !== undefined
+      ? contacts.find(({ contact }) => contact.id === selectedContactId) ?? null
+      : contacts.find(({ recording }) => recording.id === selectedId) ??
+        contacts[0] ??
+        null;
   const selectedRecording =
+    selectedContact?.recording ??
     recordings.find((recording) => recording.id === selectedId) ??
     recordings[0] ??
     null;
+  const visibleContacts = contacts.filter(({ contact }) => {
+    const query = contactSearch.trim().toLocaleLowerCase();
+    return [contact.name, contact.role, contact.company]
+      .filter(Boolean)
+      .some((value) => value.toLocaleLowerCase().includes(query));
+  });
+  const recordingsWithoutContacts = recordings.filter(
+    (recording) => !recording.contacts?.length,
+  );
+
+  useEffect(() => {
+    setSummaryDraft(selectedRecording?.executive_summary || "");
+    setEditingSummary(false);
+  }, [selectedRecording?.id, selectedRecording?.executive_summary]);
+
+  async function saveContactUpdates(contactId, updates) {
+    if (!selectedContact) return false;
+    const recordingId = selectedContact.recording.id;
+    const { error } = await supabase
+      .from("recording_contacts")
+      .update(updates)
+      .eq("id", contactId);
+    if (error) {
+      onError(`Could not update contact: ${error.message}`);
+      return false;
+    }
+
+    setRecordings((current) =>
+      current.map((recording) =>
+        recording.id === recordingId
+          ? {
+              ...recording,
+              contacts: recording.contacts.map((item) =>
+                item.id === contactId ? { ...item, ...updates } : item,
+              ),
+            }
+          : recording,
+      ),
+    );
+    return true;
+  }
+
+  async function saveSummary(event) {
+    event.preventDefault();
+    if (!selectedRecording) return;
+
+    setSavingSummary(true);
+    const summary = summaryDraft.trim();
+    const { error } = await supabase
+      .from("recordings")
+      .update({ executive_summary: summary })
+      .eq("id", selectedRecording.id);
+    setSavingSummary(false);
+    if (error) {
+      onError(`Could not update summary: ${error.message}`);
+      return;
+    }
+
+    setRecordings((current) =>
+      current.map((recording) =>
+        recording.id === selectedRecording.id
+          ? { ...recording, executive_summary: summary }
+          : recording,
+      ),
+    );
+    setEditingSummary(false);
+  }
 
   return (
     <section className="insights-page" aria-labelledby="insights-heading">
@@ -695,37 +923,91 @@ function InsightsPage({ selectedId, onSelect, onError }) {
       </header>
 
       <div className="insights-layout">
-        <aside className="recording-sidebar" aria-label="Recordings">
-          <h2>Recordings</h2>
+        <aside className="recording-sidebar" aria-label="Contacts">
+          <h2>Contacts</h2>
+          <label className="contact-search">
+            <span className="visually-hidden">Search contacts</span>
+            <input
+              type="search"
+              value={contactSearch}
+              onChange={(event) => setContactSearch(event.target.value)}
+              placeholder="Search contacts"
+            />
+          </label>
           {loadingRecordings ? (
             <p className="sidebar-message">Loading recordings…</p>
-          ) : recordings.length ? (
+          ) : visibleContacts.length ||
+            (!contactSearch.trim() && recordingsWithoutContacts.length) ? (
             <ul className="recording-list">
-              {recordings.map((recording) => (
-                <li key={recording.id}>
+              {visibleContacts.map(({ contact, recording }) => (
+                <li key={contact.id}>
                   <button
                     className={`recording-list-item${
-                      selectedRecording?.id === recording.id ? " is-selected" : ""
+                      selectedContact?.contact.id === contact.id ? " is-selected" : ""
                     }`}
                     type="button"
                     aria-current={
-                      selectedRecording?.id === recording.id ? "true" : undefined
+                      selectedContact?.contact.id === contact.id
+                        ? "true"
+                        : undefined
                     }
-                    onClick={() => onSelect(recording.id)}
+                    onClick={() => {
+                      setSelectedContactId(contact.id);
+                      onSelect(recording.id);
+                    }}
                   >
                     <span className="recording-list-date">
                       {formatRecordingDate(recording.created_at)}
                     </span>
                     <span className="recording-list-summary">
-                      {recording.executive_summary}
+                      {contactLabel(contact)}
                     </span>
+                    {contactRoleCompany(contact) && (
+                      <span className="recording-list-role">
+                        {contactRoleCompany(contact)}
+                      </span>
+                    )}
                     <span className="recording-list-duration">
                       {formatRecordingDuration(recording.duration_seconds)}
                     </span>
                   </button>
                 </li>
               ))}
+              {!contactSearch.trim() &&
+                recordingsWithoutContacts.map((recording) => (
+                  <li key={recording.id}>
+                    <button
+                      className={`recording-list-item${
+                        !selectedContact && selectedRecording?.id === recording.id
+                          ? " is-selected"
+                          : ""
+                      }`}
+                      type="button"
+                      aria-current={
+                        !selectedContact && selectedRecording?.id === recording.id
+                          ? "true"
+                          : undefined
+                      }
+                      onClick={() => {
+                        setSelectedContactId(null);
+                        onSelect(recording.id);
+                      }}
+                    >
+                      <span className="recording-list-date">
+                        {formatRecordingDate(recording.created_at)}
+                      </span>
+                      <span className="recording-list-summary">
+                        No people identified
+                      </span>
+                      <span className="recording-list-duration">
+                        {formatRecordingDuration(recording.duration_seconds)}
+                      </span>
+                    </button>
+                  </li>
+                ))}
             </ul>
+          ) : recordings.length ? (
+            <p className="sidebar-message">No contacts match your search.</p>
           ) : (
             <p className="sidebar-message">Your recordings will appear here.</p>
           )}
@@ -740,11 +1022,111 @@ function InsightsPage({ selectedId, onSelect, onError }) {
                   {formatRecordingDuration(selectedRecording.duration_seconds)}
                 </span>
               </div>
+              <section className="insight-section people-section">
+                <div className="section-heading-row">
+                  <div>
+                    <p className="section-eyebrow"></p>
+                    <h2>Contact</h2>
+                  </div>
+                  <button
+                    className="plain-button"
+                    type="button"
+                    onClick={async () => {
+                      const { data, error } = await supabase
+                        .from("recording_contacts")
+                        .insert({
+                          recording_id: selectedRecording.id,
+                          name: "",
+                          role: "",
+                          company: "",
+                        })
+                            .select("id, name, role, company")
+                        .single();
+                      if (error) {
+                        onError(`Could not add contact: ${error.message}`);
+                        return;
+                      }
+                      setRecordings((current) =>
+                        current.map((recording) =>
+                          recording.id === selectedRecording.id
+                            ? {
+                                ...recording,
+                                contacts: [...(recording.contacts || []), data],
+                              }
+                            : recording,
+                        ),
+                      );
+                      setSelectedContactId(data.id);
+                    }}
+                  >
+                    Add contact
+                  </button>
+                </div>
+                {selectedContact ? (
+                  <ContactCard
+                    key={selectedContact.contact.id}
+                    contact={selectedContact.contact}
+                    onSave={saveContactUpdates}
+                  />
+                ) : (
+                  <p className="no-contacts">
+                    No contacts were identified. Add a contact from this conversation.
+                  </p>
+                )}
+              </section>
               <section className="insight-section">
-                <h2>Executive Summary</h2>
-                <p className="executive-summary">
-                  {selectedRecording.executive_summary}
-                </p>
+                <div className="section-heading-row">
+                  <h2>Summary</h2>
+                  {editingSummary ? (
+                    <div className="contact-actions">
+                      <button
+                        className="plain-button"
+                        type="button"
+                        disabled={savingSummary}
+                        onClick={() => {
+                          setSummaryDraft(selectedRecording.executive_summary || "");
+                          setEditingSummary(false);
+                        }}
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        className="plain-button"
+                        type="submit"
+                        form="summary-form"
+                        disabled={savingSummary}
+                      >
+                        {savingSummary ? "Saving…" : "Save"}
+                      </button>
+                    </div>
+                  ) : (
+                    <button
+                      className="plain-button"
+                      type="button"
+                      onClick={() => setEditingSummary(true)}
+                    >
+                      Edit
+                    </button>
+                  )}
+                </div>
+                {editingSummary ? (
+                  <form id="summary-form" onSubmit={saveSummary}>
+                    <label className="visually-hidden" htmlFor="summary-editor">
+                      Summary
+                    </label>
+                    <textarea
+                      id="summary-editor"
+                      className="summary-editor"
+                      value={summaryDraft}
+                      onChange={(event) => setSummaryDraft(event.target.value)}
+                      rows={6}
+                    />
+                  </form>
+                ) : (
+                  <p className="executive-summary">
+                    {selectedRecording.executive_summary}
+                  </p>
+                )}
               </section>
               <section className="insight-section">
                 <h2>Key Highlights</h2>
