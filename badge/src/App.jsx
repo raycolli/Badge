@@ -198,7 +198,7 @@ function ProfilePage({ user, onError }) {
               Add photo
             </span>
           )}
-          {photoUrl && <span className="photo-action">Change photo</span>}
+          {photoUrl && <span className="photo-action">*</span>}
         </button>
         <input
           ref={fileInput}
@@ -828,7 +828,7 @@ function ContactCard({ contact, onSave }) {
   );
 }
 
-function InsightsPage({ selectedId, onSelect, onError }) {
+function InsightsPage({ selectedId, onSelect, onError, onNavigate }) {
   const [recordings, setRecordings] = useState([]);
   const [loadingRecordings, setLoadingRecordings] = useState(true);
   const [contactSearch, setContactSearch] = useState("");
@@ -842,6 +842,7 @@ function InsightsPage({ selectedId, onSelect, onError }) {
   const [editingTranscript, setEditingTranscript] = useState(false);
   const [transcriptDraft, setTranscriptDraft] = useState("");
   const [savingTranscript, setSavingTranscript] = useState(false);
+  const [updatingOutreach, setUpdatingOutreach] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -851,7 +852,7 @@ function InsightsPage({ selectedId, onSelect, onError }) {
       const { data, error } = await supabase
         .from("recordings")
         .select(
-          "id, created_at, duration_seconds, transcript, executive_summary, key_highlights, contacts:recording_contacts(id, name, role, company, email, phone_number)",
+          "id, created_at, duration_seconds, transcript, executive_summary, key_highlights, contacts:recording_contacts(id, name, role, company, email, phone_number, needs_outreach)",
         )
         .order("created_at", { ascending: false });
 
@@ -946,6 +947,33 @@ function InsightsPage({ selectedId, onSelect, onError }) {
     return true;
   }
 
+  async function toggleContactOutreach() {
+    if (!selectedContact) return;
+    const contact = selectedContact.contact;
+    const needsOutreach = !contact.needs_outreach;
+    setUpdatingOutreach(true);
+    const { error } = await supabase
+      .from("recording_contacts")
+      .update({ needs_outreach: needsOutreach })
+      .eq("id", contact.id);
+    setUpdatingOutreach(false);
+    if (error) {
+      onError(`Could not update outreach list: ${error.message}`);
+      return;
+    }
+
+    setRecordings((current) =>
+      current.map((recording) => ({
+        ...recording,
+        contacts: (recording.contacts || []).map((item) =>
+          item.id === contact.id
+            ? { ...item, needs_outreach: needsOutreach }
+            : item,
+        ),
+      })),
+    );
+  }
+
   async function saveSummary(event) {
     event.preventDefault();
     if (!selectedRecording) return;
@@ -1021,11 +1049,26 @@ function InsightsPage({ selectedId, onSelect, onError }) {
   }
 
   return (
-    <section className="insights-page" aria-labelledby="insights-heading">
+    <section className="insights-page" aria-label="Insights">
       <header className="insights-header">
-        <div>
-          <h1 id="insights-heading">Insights</h1>
-        </div>
+        <h1 className="visually-hidden">Insights</h1>
+        <nav className="insights-title-group" aria-label="Insights and Outreach">
+          <button
+            className="page-switch"
+            type="button"
+            aria-current="page"
+            onClick={() => onNavigate("Insights")}
+          >
+            Insights
+          </button>
+          <button
+            className="page-switch"
+            type="button"
+            onClick={() => onNavigate("Outreach")}
+          >
+            Outreach
+          </button>
+        </nav>
         <span className="recording-count">
           {recordings.length} {recordings.length === 1 ? "recording" : "recordings"}
         </span>
@@ -1128,41 +1171,60 @@ function InsightsPage({ selectedId, onSelect, onError }) {
                     <p className="section-eyebrow"></p>
                     <h2>Contact</h2>
                   </div>
-                  <button
-                    className="plain-button"
-                    type="button"
-                    onClick={async () => {
-                      const { data, error } = await supabase
-                        .from("recording_contacts")
-                        .insert({
-                          recording_id: selectedRecording.id,
-                          name: "",
-                          role: "",
-                          company: "",
-                          email: "",
-                          phone_number: "",
-                        })
-                            .select("id, name, role, company, email, phone_number")
-                        .single();
-                      if (error) {
-                        onError(`Could not add contact: ${error.message}`);
-                        return;
-                      }
-                      setRecordings((current) =>
-                        current.map((recording) =>
-                          recording.id === selectedRecording.id
-                            ? {
-                                ...recording,
-                                contacts: [...(recording.contacts || []), data],
-                              }
-                            : recording,
-                        ),
-                      );
-                      setSelectedContactId(data.id);
-                    }}
-                  >
-                    Add contact
-                  </button>
+                  <div className="contact-actions">
+                    {selectedContact && (
+                      <button
+                        className="plain-button"
+                        type="button"
+                        disabled={updatingOutreach}
+                        onClick={() => void toggleContactOutreach()}
+                      >
+                        {updatingOutreach
+                          ? "Updating…"
+                          : selectedContact.contact.needs_outreach
+                            ? "Remove from outreach"
+                            : "Add to outreach"}
+                      </button>
+                    )}
+                    <button
+                      className="plain-button"
+                      type="button"
+                      onClick={async () => {
+                        const { data, error } = await supabase
+                          .from("recording_contacts")
+                          .insert({
+                            recording_id: selectedRecording.id,
+                            name: "",
+                            role: "",
+                            company: "",
+                            email: "",
+                            phone_number: "",
+                            needs_outreach: false,
+                          })
+                          .select(
+                            "id, name, role, company, email, phone_number, needs_outreach",
+                          )
+                          .single();
+                        if (error) {
+                          onError(`Could not add contact: ${error.message}`);
+                          return;
+                        }
+                        setRecordings((current) =>
+                          current.map((recording) =>
+                            recording.id === selectedRecording.id
+                              ? {
+                                  ...recording,
+                                  contacts: [...(recording.contacts || []), data],
+                                }
+                              : recording,
+                          ),
+                        );
+                        setSelectedContactId(data.id);
+                      }}
+                    >
+                      Add contact
+                    </button>
+                  </div>
                 </div>
                 {selectedContact ? (
                   <ContactCard
@@ -1361,6 +1423,446 @@ function InsightsPage({ selectedId, onSelect, onError }) {
   );
 }
 
+function formatCalendarDate(value) {
+  const date = new Date(value);
+  return `${date.getUTCFullYear()}${String(date.getUTCMonth() + 1).padStart(2, "0")}${String(date.getUTCDate()).padStart(2, "0")}T${String(date.getUTCHours()).padStart(2, "0")}${String(date.getUTCMinutes()).padStart(2, "0")}00Z`;
+}
+
+function OutreachPage({ session, onError, onNavigate }) {
+  const [recordings, setRecordings] = useState([]);
+  const [loadingContacts, setLoadingContacts] = useState(true);
+  const [search, setSearch] = useState("");
+  const [selectedContactId, setSelectedContactId] = useState(null);
+  const [selectedMethod, setSelectedMethod] = useState(null);
+  const [emailContext, setEmailContext] = useState("");
+  const [emailSubject, setEmailSubject] = useState("");
+  const [emailBody, setEmailBody] = useState("");
+  const [draftingEmail, setDraftingEmail] = useState(false);
+  const [meetingDateTime, setMeetingDateTime] = useState(() => {
+    const date = new Date();
+    date.setHours(date.getHours() + 1, 0, 0, 0);
+    return new Date(date.getTime() - date.getTimezoneOffset() * 60000)
+      .toISOString()
+      .slice(0, 16);
+  });
+
+  useEffect(() => {
+    let active = true;
+
+    async function loadContacts() {
+      const { data, error } = await supabase
+        .from("recordings")
+        .select(
+          "id, created_at, executive_summary, transcript, contacts:recording_contacts(id, name, role, company, email, phone_number, needs_outreach)",
+        )
+        .order("created_at", { ascending: false });
+
+      if (!active) return;
+      setLoadingContacts(false);
+      if (error) {
+        onError(`Could not load outreach contacts: ${error.message}`);
+        return;
+      }
+
+      setRecordings(data);
+      const allContacts = data.flatMap((recording) => recording.contacts || []);
+      const pipelineContacts = allContacts.filter(
+        (contact) => contact.needs_outreach,
+      );
+      if (!pipelineContacts.some((contact) => contact.id === selectedContactId)) {
+        setSelectedContactId(
+          pipelineContacts[0]?.id ?? null,
+        );
+      }
+    }
+
+    void loadContacts();
+    return () => {
+      active = false;
+    };
+  }, [onError]);
+
+  const contacts = recordings.flatMap((recording) =>
+    (recording.contacts || [])
+      .filter((contact) => contact.needs_outreach)
+      .map((contact) => ({ contact, recording })),
+  );
+  const selectedContact =
+    contacts.find(({ contact }) => contact.id === selectedContactId) ?? null;
+  const visibleContacts = contacts.filter(({ contact }) => {
+    const query = search.trim().toLocaleLowerCase();
+    return [
+      contact.name,
+      contact.role,
+      contact.company,
+      contact.email,
+      contact.phone_number,
+    ]
+      .filter(Boolean)
+      .some((value) => value.toLocaleLowerCase().includes(query));
+  });
+
+  useEffect(() => {
+    setSelectedMethod(null);
+    setEmailContext("");
+    setEmailSubject("");
+    setEmailBody("");
+  }, [selectedContactId]);
+
+  async function generateEmailDraft(event) {
+    event?.preventDefault();
+    if (!selectedContact) return;
+    setDraftingEmail(true);
+    try {
+      const response = await fetch("/api/outreach-draft", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${session.access_token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          contact: {
+            name: selectedContact.contact.name,
+            role: selectedContact.contact.role,
+            company: selectedContact.contact.company,
+          },
+          summary: selectedContact.recording.executive_summary,
+          transcript: selectedContact.recording.transcript,
+          context: emailContext.trim(),
+        }),
+      });
+      const result = await response.json();
+      if (!response.ok) {
+        throw new Error(result.error || "Could not draft the email.");
+      }
+      if (
+        typeof result.subject !== "string" ||
+        typeof result.body !== "string" ||
+        !result.subject.trim() ||
+        !result.body.trim()
+      ) {
+        throw new Error("The AI returned an invalid email draft.");
+      }
+      setEmailSubject(result.subject);
+      setEmailBody(result.body);
+    } catch (error) {
+      onError(error.message || "Could not draft the email.");
+    } finally {
+      setDraftingEmail(false);
+    }
+  }
+
+  function gmailComposeUrl() {
+    if (!selectedContact || !emailSubject.trim() || !emailBody.trim()) return "";
+    const params = new URLSearchParams({
+      view: "cm",
+      fs: "1",
+      to: selectedContact.contact.email || "",
+      su: emailSubject,
+      body: emailBody,
+    });
+    return `https://mail.google.com/mail/?${params.toString()}`;
+  }
+
+  function calendarUrl() {
+    if (!selectedContact || !meetingDateTime) return "";
+    const start = new Date(meetingDateTime);
+    if (Number.isNaN(start.getTime())) return "";
+    const end = new Date(start.getTime() + 30 * 60 * 1000);
+    const contact = selectedContact.contact;
+    const params = new URLSearchParams({
+      action: "TEMPLATE",
+      text: `Follow-up with ${contact.name || "contact"}`,
+      dates: `${formatCalendarDate(start)}/${formatCalendarDate(end)}`,
+      details: `Follow-up conversation.\n\nNotes: ${selectedContact.recording.executive_summary || ""}`,
+      ctz: Intl.DateTimeFormat().resolvedOptions().timeZone,
+    });
+    if (contact.email) params.set("add", contact.email);
+    return `https://calendar.google.com/calendar/render?${params.toString()}`;
+  }
+
+  return (
+    <section className="insights-page" aria-label="Outreach">
+      <header className="insights-header">
+        <h1 className="visually-hidden">Outreach</h1>
+        <nav className="insights-title-group" aria-label="Insights and Outreach">
+          <button
+            className="page-switch"
+            type="button"
+            onClick={() => onNavigate("Insights")}
+          >
+            Insights
+          </button>
+          <button
+            className="page-switch"
+            type="button"
+            aria-current="page"
+            onClick={() => onNavigate("Insights")}
+          >
+            Outreach
+          </button>
+        </nav>
+        <span className="recording-count">
+          {contacts.length} in pipeline
+        </span>
+      </header>
+
+      <div className="outreach-layout">
+        <aside className="recording-sidebar outreach-contact-list" aria-label="Contacts">
+          <h2>Contacts</h2>
+          <label className="contact-search">
+            <span className="visually-hidden">Search contacts</span>
+            <input
+              type="search"
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+              placeholder="Search contacts"
+            />
+          </label>
+          {loadingContacts ? (
+            <p className="sidebar-message">Loading contacts…</p>
+          ) : visibleContacts.length ? (
+            <ul className="recording-list">
+              {visibleContacts.map(({ contact, recording }) => (
+                <li className="outreach-list-row" key={contact.id}>
+                  <button
+                    className={`recording-list-item outreach-select${
+                      selectedContactId === contact.id ? " is-selected" : ""
+                    }`}
+                    type="button"
+                    aria-current={selectedContactId === contact.id ? "true" : undefined}
+                    onClick={() => setSelectedContactId(contact.id)}
+                  >
+                    <span className="recording-list-summary">
+                      {contactLabel(contact)}
+                    </span>
+                    {contactRoleCompany(contact) && (
+                      <span className="recording-list-role">
+                        {contactRoleCompany(contact)}
+                      </span>
+                    )}
+                    <span className="recording-list-date">
+                      {formatRecordingDate(recording.created_at)}
+                    </span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="sidebar-message">
+              {contacts.length
+                ? "No contacts match your search."
+                : "No contacts in your outreach pipeline. Add contacts from Insights."}
+            </p>
+          )}
+        </aside>
+
+        <aside className="outreach-methods" aria-label="Available actions">
+          {selectedContact ? (
+            <>
+              <h2>Actions</h2>
+              <p className="outreach-methods-hint">Choose how you want to follow up.</p>
+              <div className="outreach-method-group">
+                <p className="outreach-category">Reach Out</p>
+                <button
+                  className={`outreach-method${selectedMethod === "email" ? " is-selected" : ""}`}
+                  type="button"
+                  aria-pressed={selectedMethod === "email"}
+                  onClick={() => {
+                    setSelectedMethod("email");
+                    setEmailSubject("");
+                    setEmailBody("");
+                    void generateEmailDraft();
+                  }}
+                >
+                  <strong>Email</strong>
+                  <span>Draft a personalized email</span>
+                </button>
+                <button
+                  className={`outreach-method${selectedMethod === "phone" ? " is-selected" : ""}`}
+                  type="button"
+                  aria-pressed={selectedMethod === "phone"}
+                  onClick={() => setSelectedMethod("phone")}
+                >
+                  <strong>Phone call</strong>
+                  <span>Call using the saved number</span>
+                </button>
+              </div>
+              <div className="outreach-method-group">
+                <p className="outreach-category">Scheduling</p>
+                <button
+                  className={`outreach-method${selectedMethod === "meeting" ? " is-selected" : ""}`}
+                  type="button"
+                  aria-pressed={selectedMethod === "meeting"}
+                  onClick={() => setSelectedMethod("meeting")}
+                >
+                  <strong>Schedule meeting</strong>
+                  <span>Prepare a Calendar invite</span>
+                </button>
+              </div>
+            </>
+          ) : (
+            <div className="empty-insights">
+              <h2>Actions</h2>
+              {!loadingContacts && (
+                <p>Add a contact to your pipeline from Insights to see available actions.</p>
+              )}
+            </div>
+          )}
+        </aside>
+
+        <article className="outreach-options" aria-label="Outreach workflow">
+          <header className="outreach-workflow-header">
+            <div>
+              <p className="section-eyebrow">OUTREACH WORKFLOW</p>
+              <h2>
+                {selectedContact
+                  ? `${contactLabel(selectedContact.contact)} — Follow-up`
+                  : loadingContacts
+                    ? "Loading contacts…"
+                    : "Choose a contact"}
+              </h2>
+              {selectedContact && contactRoleCompany(selectedContact.contact) && (
+                <p className="outreach-workflow-subtitle">
+                  {contactRoleCompany(selectedContact.contact)}
+                </p>
+              )}
+            </div>
+            {selectedContact && (
+              <span className="outreach-status">In pipeline</span>
+            )}
+          </header>
+          {selectedContact && selectedMethod === "email" ? (
+            <section className="outreach-option">
+              <div className="outreach-action-heading">
+                <span className="outreach-action-category">Communication</span>
+                <h3>Next outreach: Email</h3>
+                <p>Draft a personalized email using your conversation details.</p>
+              </div>
+              <form className="outreach-email-form" onSubmit={generateEmailDraft}>
+                <label>
+                  What would you like to follow up about?
+                  <textarea
+                    value={emailContext}
+                    onChange={(event) => setEmailContext(event.target.value)}
+                    placeholder="Optional notes to guide the draft"
+                    rows={3}
+                  />
+                </label>
+                <button
+                  className="plain-button"
+                  type="submit"
+                  disabled={draftingEmail}
+                >
+                  {draftingEmail ? "Drafting…" : "Draft email with AI"}
+                </button>
+              </form>
+              {draftingEmail && <p className="sidebar-message">Creating a personalized draft…</p>}
+              {emailSubject && emailBody && (
+                <div className="outreach-email-draft">
+                  <label>
+                    Subject
+                    <input
+                      value={emailSubject}
+                      onChange={(event) => setEmailSubject(event.target.value)}
+                    />
+                  </label>
+                  <label>
+                    Draft
+                    <textarea
+                      value={emailBody}
+                      onChange={(event) => setEmailBody(event.target.value)}
+                      rows={7}
+                    />
+                  </label>
+                  {!selectedContact.contact.email && (
+                    <p className="sidebar-message">
+                      Add an email address in Insights, or enter the recipient in Gmail.
+                    </p>
+                  )}
+                  <a
+                    className="outreach-action-link"
+                    href={gmailComposeUrl()}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    Open draft in Gmail
+                  </a>
+                </div>
+              )}
+            </section>
+          ) : selectedContact && selectedMethod === "phone" ? (
+            <section className="outreach-option">
+              <div className="outreach-action-heading">
+                <span className="outreach-action-category">Communication</span>
+                <h3>Next outreach: Phone call</h3>
+                <p>Call the contact using the phone number saved in Insights.</p>
+              </div>
+              {selectedContact.contact.phone_number ? (
+                <a
+                  className="outreach-action-link"
+                  href={`tel:${selectedContact.contact.phone_number}`}
+                >
+                  {selectedContact.contact.phone_number}
+                </a>
+              ) : (
+                <p className="sidebar-message">
+                  Add a phone number in Insights.
+                </p>
+              )}
+            </section>
+          ) : selectedContact && selectedMethod === "meeting" ? (
+            <section className="outreach-option">
+              <div className="outreach-action-heading">
+                <span className="outreach-action-category">Scheduling</span>
+                <h3>Next outreach: Schedule meeting</h3>
+                <p>Choose a time to prepare a Google Calendar invitation.</p>
+              </div>
+              <label className="meeting-time-label">
+                Date and time
+                <input
+                  type="datetime-local"
+                  value={meetingDateTime}
+                  onChange={(event) => setMeetingDateTime(event.target.value)}
+                />
+              </label>
+              {calendarUrl() ? (
+                <a
+                  className="outreach-action-link"
+                  href={calendarUrl()}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  Open in Google Calendar
+                </a>
+              ) : (
+                <p className="sidebar-message">
+                  Choose a date and time to prepare the Calendar invite.
+                </p>
+              )}
+              <p className="meeting-note">
+                Add a Google Meet link in Calendar before saving the event.
+              </p>
+            </section>
+          ) : selectedContact ? (
+            <div className="empty-insights">
+              <h2>Next Steps</h2>
+              <p>Select Email, Phone Call, or Schedule Meeting</p>
+            </div>
+          ) : (
+            <div className="empty-insights">
+              <h2>Your outreach workspace</h2>
+              <p>
+                Select a contact from your pipeline to see the available follow-up actions.
+              </p>
+            </div>
+          )}
+        </article>
+      </div>
+    </section>
+  );
+}
+
 function App() {
   const [session, setSession] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -1437,7 +1939,15 @@ function App() {
   }
 
   return (
-    <main className={`app-shell${tab === "Insights" ? " insights-open" : ""}`}>
+    <main
+      className={`app-shell${
+        tab === "Insights"
+          ? " insights-open"
+          : tab === "Outreach"
+            ? " outreach-open"
+            : ""
+      }`}
+    >
       <header className="app-header">
         <button className="plain-button" type="button" onClick={signOut}>
           Sign out
@@ -1461,6 +1971,14 @@ function App() {
           selectedId={selectedRecordingId}
           onSelect={setSelectedRecordingId}
           onError={setError}
+          onNavigate={setTab}
+        />
+      )}
+      {tab === "Outreach" && (
+        <OutreachPage
+          session={session}
+          onError={setError}
+          onNavigate={setTab}
         />
       )}
 
@@ -1470,9 +1988,17 @@ function App() {
         {TABS.map((item) => (
           <button
             key={item}
-            className={`nav-tab${tab === item ? " is-active" : ""}`}
+            className={`nav-tab${
+              tab === item || (tab === "Outreach" && item === "Insights")
+                ? " is-active"
+                : ""
+            }`}
             type="button"
-            aria-current={tab === item ? "page" : undefined}
+            aria-current={
+              tab === item || (tab === "Outreach" && item === "Insights")
+                ? "page"
+                : undefined
+            }
             onClick={() => {
               setTab(item);
               setError("");
