@@ -724,7 +724,7 @@ function ContactCard({ contact, onSave }) {
               onChange={(event) =>
                 setDraft({ ...draft, name: event.target.value })
               }
-              placeholder="Person's name"
+              placeholder="Name"
             />
           </label>
           <label>
@@ -736,7 +736,7 @@ function ContactCard({ contact, onSave }) {
               onChange={(event) =>
                 setDraft({ ...draft, role: event.target.value })
               }
-              placeholder="Job title"
+              placeholder="Role"
             />
           </label>
           <label>
@@ -761,20 +761,25 @@ function ContactCard({ contact, onSave }) {
               onChange={(event) =>
                 setDraft({ ...draft, email: event.target.value })
               }
-              placeholder="Email address (optional)"
+              placeholder="Email address"
             />
           </label>
           <label>
             Phone number
             <input
-              type="tel"
+              type="text"
               autoComplete="tel"
+              inputMode="numeric"
+              pattern="[0-9]*"
               maxLength={32}
               value={draft.phone_number}
               onChange={(event) =>
-                setDraft({ ...draft, phone_number: event.target.value })
+                setDraft({
+                  ...draft,
+                  phone_number: event.target.value.replace(/\D/g, ""),
+                })
               }
-              placeholder="Phone number (optional)"
+              placeholder="Phone number"
             />
           </label>
           <div className="contact-actions">
