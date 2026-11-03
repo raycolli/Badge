@@ -676,6 +676,8 @@ function ContactCard({ contact, onSave }) {
     name: contact.name || "",
     role: contact.role || "",
     company: contact.company || "",
+    email: contact.email || "",
+    phone_number: contact.phone_number || "",
   });
   const [saving, setSaving] = useState(false);
 
@@ -684,8 +686,16 @@ function ContactCard({ contact, onSave }) {
       name: contact.name || "",
       role: contact.role || "",
       company: contact.company || "",
+      email: contact.email || "",
+      phone_number: contact.phone_number || "",
     });
-  }, [contact.name, contact.role, contact.company]);
+  }, [
+    contact.name,
+    contact.role,
+    contact.company,
+    contact.email,
+    contact.phone_number,
+  ]);
 
   async function saveContact(event) {
     event.preventDefault();
@@ -694,6 +704,8 @@ function ContactCard({ contact, onSave }) {
       name: draft.name.trim(),
       role: draft.role.trim(),
       company: draft.company.trim(),
+      email: draft.email.trim(),
+      phone_number: draft.phone_number.trim(),
     });
     setSaving(false);
     if (saved) setEditing(false);
@@ -739,6 +751,32 @@ function ContactCard({ contact, onSave }) {
               placeholder="Company"
             />
           </label>
+          <label>
+            Email
+            <input
+              type="email"
+              autoComplete="email"
+              maxLength={254}
+              value={draft.email}
+              onChange={(event) =>
+                setDraft({ ...draft, email: event.target.value })
+              }
+              placeholder="Email address (optional)"
+            />
+          </label>
+          <label>
+            Phone number
+            <input
+              type="tel"
+              autoComplete="tel"
+              maxLength={32}
+              value={draft.phone_number}
+              onChange={(event) =>
+                setDraft({ ...draft, phone_number: event.target.value })
+              }
+              placeholder="Phone number (optional)"
+            />
+          </label>
           <div className="contact-actions">
             <button
               className="plain-button"
@@ -748,6 +786,8 @@ function ContactCard({ contact, onSave }) {
                   name: contact.name || "",
                   role: contact.role || "",
                   company: contact.company || "",
+                  email: contact.email || "",
+                  phone_number: contact.phone_number || "",
                 });
                 setEditing(false);
               }}
@@ -767,6 +807,8 @@ function ContactCard({ contact, onSave }) {
             {contactRoleCompany(contact) && (
               <p>{contactRoleCompany(contact)}</p>
             )}
+            {contact.email && <p>{contact.email}</p>}
+            {contact.phone_number && <p>{contact.phone_number}</p>}
           </div>
           <button
             className="plain-button"
@@ -804,7 +846,7 @@ function InsightsPage({ selectedId, onSelect, onError }) {
       const { data, error } = await supabase
         .from("recordings")
         .select(
-          "id, created_at, duration_seconds, transcript, executive_summary, key_highlights, contacts:recording_contacts(id, name, role, company)",
+          "id, created_at, duration_seconds, transcript, executive_summary, key_highlights, contacts:recording_contacts(id, name, role, company, email, phone_number)",
         )
         .order("created_at", { ascending: false });
 
@@ -844,7 +886,13 @@ function InsightsPage({ selectedId, onSelect, onError }) {
     null;
   const visibleContacts = contacts.filter(({ contact }) => {
     const query = contactSearch.trim().toLocaleLowerCase();
-    return [contact.name, contact.role, contact.company]
+    return [
+      contact.name,
+      contact.role,
+      contact.company,
+      contact.email,
+      contact.phone_number,
+    ]
       .filter(Boolean)
       .some((value) => value.toLocaleLowerCase().includes(query));
   });
@@ -1086,8 +1134,10 @@ function InsightsPage({ selectedId, onSelect, onError }) {
                           name: "",
                           role: "",
                           company: "",
+                          email: "",
+                          phone_number: "",
                         })
-                            .select("id, name, role, company")
+                            .select("id, name, role, company, email, phone_number")
                         .single();
                       if (error) {
                         onError(`Could not add contact: ${error.message}`);
