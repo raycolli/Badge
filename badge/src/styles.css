@@ -148,7 +148,7 @@ h1 {
 }
 
 .badge-card {
-  width: min(100%, 370px);
+  width: min(100%, 185px);
   overflow: hidden;
   border: 1px solid #e3e3e3;
   background: #fff;
@@ -159,8 +159,8 @@ h1 {
   position: relative;
   display: grid;
   width: 100%;
-  height: min(58dvh, 500px);
-  min-height: 270px;
+  height: min(29dvh, 250px);
+  min-height: 135px;
   overflow: hidden;
   place-items: center;
   padding: 0;
@@ -205,9 +205,9 @@ h1 {
 }
 
 .badge-name {
-  padding: 22px 18px 24px;
+  padding: 11px 9px 12px;
   color: #111;
-  font-size: clamp(24px, 6vw, 32px);
+  font-size: clamp(12px, 3vw, 16px);
   font-weight: 700;
   overflow-wrap: anywhere;
 }
@@ -1021,8 +1021,8 @@ h1 {
   }
 
   .badge-photo {
-    height: 48dvh;
-    min-height: 210px;
+    height: 24dvh;
+    min-height: 105px;
   }
 }
 

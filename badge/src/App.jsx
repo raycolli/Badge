@@ -1719,7 +1719,7 @@ function OutreachPage({ session, onError, onNavigate }) {
               <p className="section-eyebrow">OUTREACH WORKFLOW</p>
               <h2>
                 {selectedContact
-                  ? `${contactLabel(selectedContact.contact)} — Follow-up`
+                  ? `${contactLabel(selectedContact.contact)}`
                   : loadingContacts
                     ? "Loading contacts…"
                     : "Choose a contact"}
