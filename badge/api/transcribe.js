@@ -4,7 +4,7 @@ export const config = {
   api: {
     bodyParser: false,
   },
-  maxDuration: 60,
+  maxDuration: 120,
 };
 
 export default function handler(request, response) {

@@ -252,6 +252,69 @@ function ProfilePage({ user, onError }) {
   );
 }
 
+async function convertRecordingToWav(blob) {
+  const AudioContextConstructor = window.AudioContext || window.webkitAudioContext;
+  if (!AudioContextConstructor) {
+    throw new Error("Audio conversion is not supported in this browser.");
+  }
+
+  const audioContext = new AudioContextConstructor();
+  try {
+    const decoded = await audioContext.decodeAudioData(await blob.arrayBuffer());
+    const sampleRate = 16000;
+    const frameCount = Math.ceil(
+      (decoded.length * sampleRate) / decoded.sampleRate,
+    );
+    const wavBuffer = new ArrayBuffer(44 + frameCount * 2);
+    const view = new DataView(wavBuffer);
+    const writeString = (offset, value) => {
+      for (let index = 0; index < value.length; index += 1) {
+        view.setUint8(offset + index, value.charCodeAt(index));
+      }
+    };
+
+    writeString(0, "RIFF");
+    view.setUint32(4, 36 + frameCount * 2, true);
+    writeString(8, "WAVE");
+    writeString(12, "fmt ");
+    view.setUint32(16, 16, true);
+    view.setUint16(20, 1, true);
+    view.setUint16(22, 1, true);
+    view.setUint32(24, sampleRate, true);
+    view.setUint32(28, sampleRate * 2, true);
+    view.setUint16(32, 2, true);
+    view.setUint16(34, 16, true);
+    writeString(36, "data");
+    view.setUint32(40, frameCount * 2, true);
+
+    const channels = Array.from(
+      { length: decoded.numberOfChannels },
+      (_, index) => decoded.getChannelData(index),
+    );
+    for (let frame = 0; frame < frameCount; frame += 1) {
+      const sourcePosition = (frame * decoded.sampleRate) / sampleRate;
+      const sourceFrame = Math.floor(sourcePosition);
+      const fraction = sourcePosition - sourceFrame;
+      let sample = 0;
+      for (const channel of channels) {
+        const first = channel[sourceFrame] || 0;
+        const second = channel[sourceFrame + 1] || first;
+        sample += first + (second - first) * fraction;
+      }
+      sample /= channels.length;
+      const clamped = Math.max(-1, Math.min(1, sample));
+      view.setInt16(
+        44 + frame * 2,
+        clamped < 0 ? clamped * 0x8000 : clamped * 0x7fff,
+        true,
+      );
+    }
+    return new Blob([wavBuffer], { type: "audio/wav" });
+  } finally {
+    await audioContext.close();
+  }
+}
+
 const MAX_RECORDING_MS = 5 * 60 * 1000;
 
 function RecordPage({ onError, onSaved }) {
@@ -319,8 +382,9 @@ function RecordPage({ onError, onSaved }) {
       if (!extension) {
         throw new Error(`This browser recorded an unsupported audio format: ${mediaType || "unknown"}.`);
       }
+      const wavBlob = await convertRecordingToWav(blob);
       const formData = new FormData();
-      formData.append("audio", blob, `recording.${extension}`);
+      formData.append("audio", wavBlob, "recording.wav");
       formData.append("durationSeconds", String(durationSeconds));
       const response = await fetch("/api/transcribe", {
         method: "POST",
