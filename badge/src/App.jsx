@@ -383,9 +383,13 @@ function RecordPage({ onError, onSaved }) {
             })),
           );
         if (contactsError) {
-          throw new Error(
-            `Recording saved, but its contacts could not be saved: ${contactsError.message}`,
-          );
+          if (mounted.current) {
+            onSaved(savedRecording.id);
+            onError(
+              `Recording saved, but its contacts could not be saved: ${contactsError.message}`,
+            );
+          }
+          return;
         }
       }
 
@@ -603,9 +607,7 @@ function RecordPage({ onError, onSaved }) {
   return (
     <section className="record-page" aria-labelledby="record-heading">
       <h1 id="record-heading">Record Conversation</h1>
-      <p className="record-description">
-        Capture up to 5 minutes. Recording stops automatically at the limit.
-      </p>
+      <p className="record-description"></p>
       <button
         className={`record-button${recording ? " is-recording" : ""}`}
         type="button"
