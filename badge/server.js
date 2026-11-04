@@ -4,6 +4,7 @@ import express from "express";
 import multer from "multer";
 import OpenAI from "openai";
 import { fileURLToPath } from "node:url";
+import { resolve } from "node:path";
 
 const app = express();
 app.use(express.json({ limit: "64kb" }));
@@ -233,8 +234,11 @@ app.post(
       });
     } catch (error) {
       console.error("Audio transcription or insight generation failed:", {
+        name: error.name,
+        message: error.message,
         status: error.status,
         code: error.code,
+        requestId: error.request_id,
       });
       const message =
         error.status === 401
@@ -243,7 +247,7 @@ app.post(
             ? "OpenAI rate limit or usage limit reached. Check the project's billing and limits."
             : `OpenAI transcription or insight generation failed${
                 error.status ? ` (HTTP ${error.status})` : ""
-              }. Check the terminal running npm run dev for details.`;
+              }. Check the Vercel function logs for /api/transcribe to see the cause.`;
       next(
         Object.assign(new Error(message), { status: 502 }),
       );
@@ -253,10 +257,6 @@ app.post(
 
 app.use((error, _request, response, _next) => {
   if (response.headersSent) return;
-  if (error instanceof multer.MulterError && error.code === "LIMIT_FILE_SIZE") {
-    response.status(413).json({ error: "Recordings must be 25 MB or smaller." });
-    return;
-  }
   const status = error.status || 500;
   if (status >= 500) console.error("API request failed:", error.message);
   response.status(status).json({ error: error.message || "Request failed." });
@@ -270,6 +270,10 @@ if (process.env.NODE_ENV === "production") {
   });
 }
 
-app.listen(port, () => {
-  console.log(`Badge API listening on http://localhost:${port}`);
-});
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  app.listen(port, () => {
+    console.log(`Badge API listening on http://localhost:${port}`);
+  });
+}
+
+export default app;
