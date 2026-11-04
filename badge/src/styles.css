@@ -148,7 +148,7 @@ h1 {
 }
 
 .badge-card {
-  width: min(100%, 185px);
+  width: min(100%, 150px);
   overflow: hidden;
   border: 1px solid #e3e3e3;
   background: #fff;
@@ -159,8 +159,8 @@ h1 {
   position: relative;
   display: grid;
   width: 100%;
-  height: min(29dvh, 250px);
-  min-height: 135px;
+  height: min(22dvh, 180px);
+  min-height: 100px;
   overflow: hidden;
   place-items: center;
   padding: 0;
@@ -178,36 +178,36 @@ h1 {
 .photo-placeholder {
   display: grid;
   justify-items: center;
-  gap: 9px;
+  gap: 6px;
   color: #111;
-  font-size: 14px;
+  font-size: 12px;
 }
 
 .photo-plus {
   display: grid;
-  width: 38px;
-  height: 38px;
+  width: 28px;
+  height: 28px;
   place-items: center;
   border: 1px solid #111;
   border-radius: 50%;
-  font-size: 24px;
+  font-size: 18px;
   font-weight: 300;
 }
 
 .photo-action {
   position: absolute;
-  right: 12px;
-  bottom: 12px;
-  padding: 8px 10px;
+  right: 8px;
+  bottom: 8px;
+  padding: 5px 7px;
   background: #fff;
   color: #111;
-  font-size: 12px;
+  font-size: 10px;
 }
 
 .badge-name {
-  padding: 11px 9px 12px;
+  padding: 8px 7px 9px;
   color: #111;
-  font-size: clamp(12px, 3vw, 16px);
+  font-size: clamp(8px, 2vw, 10px);
   font-weight: 700;
   overflow-wrap: anywhere;
 }
@@ -1021,8 +1021,8 @@ h1 {
   }
 
   .badge-photo {
-    height: 24dvh;
-    min-height: 105px;
+    height: 18dvh;
+    min-height: 80px;
   }
 }
 
